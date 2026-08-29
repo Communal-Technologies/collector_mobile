@@ -45,19 +45,7 @@ class SplashScreen extends StatelessWidget {
             child: Column(
               children: [
                 const Spacer(),
-                Container(
-                  height: 76,
-                  width: 76,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: const Icon(
-                    Icons.account_balance_wallet_outlined,
-                    color: AppColors.primary,
-                    size: 38,
-                  ),
-                ),
+                const _LogoCircle(),
                 const SizedBox(height: 22),
                 const Text(
                   AppConfig.appName,
@@ -115,17 +103,108 @@ class SplashScreen extends StatelessWidget {
   }
 }
 
-class _Loading extends StatelessWidget {
-  const _Loading();
+/// The member app's splash mark, at the member app's proportions: its circle is
+/// 200 of a 430-wide design and the mark inside is 140 of it, so both are taken
+/// off the real width rather than pinned to a number that only suits one phone.
+class _LogoCircle extends StatelessWidget {
+  const _LogoCircle();
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
-      height: 3,
-      width: 120,
-      child: LinearProgressIndicator(
-        backgroundColor: Colors.white24,
+    final diameter = (MediaQuery.sizeOf(context).width * 200 / 430).clamp(
+      140.0,
+      220.0,
+    );
+
+    return Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
         color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Image.asset(
+          'assets/images/icon-02.png',
+          width: diameter * 0.7,
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+}
+
+/// The member app's loader, actually moving.
+///
+/// There it is a static bar whose gradient stop is animated, which only slides a
+/// colour boundary — so the same three colours are used here, on a segment that
+/// travels the track. A repeating controller read straight would jump at the seam;
+/// folding it into a triangle wave sends the segment out and back instead.
+class _Loading extends StatefulWidget {
+  const _Loading();
+
+  @override
+  State<_Loading> createState() => _LoadingState();
+}
+
+class _LoadingState extends State<_Loading>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 120,
+      height: 4,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white24,
+          borderRadius: BorderRadius.circular(2),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              final t = _controller.value <= 0.5
+                  ? _controller.value * 2
+                  : (1 - _controller.value) * 2;
+              return Align(
+                alignment: Alignment(Curves.easeInOut.transform(t) * 2 - 1, 0),
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(2),
+                    gradient: const LinearGradient(
+                      colors: [
+                        Color(0xFF00D9FF),
+                        Color(0xFF00A8E8),
+                        Color(0xFFFFC107),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }
