@@ -225,9 +225,9 @@ class _VerifyScreenState extends State<VerifyScreen> {
                 const SizedBox(height: 20),
                 const Notice(
                   text:
-                      'You have no PIN yet. Choose one now — it is what you will '
-                      'sign in with from here on, and it is the same PIN if this '
-                      'account ever uses the member app.',
+                      'This account has no PIN yet. Choose one now — it is what you '
+                      'will sign in with from here on, and it is the same PIN the '
+                      'member app uses.',
                 ),
                 const SizedBox(height: 14),
                 TextField(
@@ -266,8 +266,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
               const SizedBox(height: 24),
               const OfflineNotice(
                 reason:
-                    'The code can only be checked by the cooperative, so this '
-                    'last step needs a connection.',
+                    'The code can only be checked by Communal, so this last step '
+                    'needs a connection.',
               ),
               FilledButton(
                 onPressed: _busy || offline ? null : _submit,

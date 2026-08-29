@@ -343,7 +343,7 @@ class SplashBlocked extends StatelessWidget {
                     SizedBox(height: 12.h),
                     Text(
                       hasTransport
-                          ? 'Cannot reach the cooperative'
+                          ? 'Cannot reach Communal'
                           : 'No network on this phone',
                       textAlign: TextAlign.center,
                       style: TextStyle(
@@ -356,10 +356,10 @@ class SplashBlocked extends StatelessWidget {
                     Text(
                       hasTransport
                           ? 'You are connected to something, but it is not carrying us. '
-                                'Signing in needs the cooperative to send your code, so it '
-                                'has to wait. We keep trying.'
-                          : 'Turn on mobile data or wifi. Signing in needs the cooperative '
-                                'to send your code — once you are in, the app works without '
+                                'Signing in needs your code sent and checked, so it has to '
+                                'wait. We keep trying.'
+                          : 'Turn on mobile data or wifi. Signing in needs your code sent '
+                                'and checked — once you are in, the app works without '
                                 'signal.',
                       textAlign: TextAlign.center,
                       style: TextStyle(

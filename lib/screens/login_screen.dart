@@ -12,10 +12,12 @@ import 'verify_screen.dart';
 
 /// Step one of signing in: who is this, and do they already have a PIN.
 ///
-/// Whether the PIN is required is not something this screen can know — an account
-/// registered only as a collector has never set one, and a collector who is also a
-/// member of the cooperative has had one all along. So the field is offered and
-/// explained rather than demanded, and the server decides.
+/// A collector signs in with the Communal account they already have — the
+/// cooperative gives that account the collector role, it does not issue a login or
+/// a phone number and email of its own. Whether the PIN is required is still not
+/// something this screen can know: an account that has never opened the member app
+/// has no PIN yet. So the field is offered and explained rather than demanded, and
+/// the server decides.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -41,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (login.isEmpty) {
       setState(
         () => _error =
-            'Enter the phone number or email the cooperative registered you with.',
+            'Enter the phone number or email you use for Communal.',
       );
       return;
     }
@@ -83,14 +85,14 @@ class _LoginScreenState extends State<LoginScreen> {
               Container(
                 height: 56,
                 width: 56,
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(
-                  Icons.account_balance_wallet_outlined,
-                  color: AppColors.primary,
-                  size: 28,
+                child: Image.asset(
+                  'assets/images/icon-02.png',
+                  fit: BoxFit.contain,
                 ),
               ),
               const SizedBox(height: 20),
@@ -100,8 +102,9 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Use the phone number or email your cooperative registered you with. '
-                'You do not sign up here — a cooperative registers its collectors.',
+                'Sign in with your Communal account — the same phone number or email '
+                'and the same PIN. There is nothing to sign up for here: your '
+                'cooperative gives an account you already have the collector role.',
                 style: TextStyle(color: AppColors.muted, height: 1.45),
               ),
               const SizedBox(height: 24),
@@ -130,8 +133,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   counterText: '',
                   helperMaxLines: 3,
                   helperText:
-                      'If you already use the Communal app, this is the same 6-digit PIN. '
-                      'Leave it blank if you have never set one — you will choose it next.',
+                      'The same 6-digit PIN as the Communal app. Leave it blank only if '
+                      'you have never set one — then you will choose it next.',
                 ),
                 onSubmitted: (_) => _submit(),
               ),
@@ -147,8 +150,8 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 22),
               const OfflineNotice(
                 reason:
-                    'Signing in needs a connection — only the cooperative can '
-                    'send your code.',
+                    'Signing in needs a connection — the code has to be sent to '
+                    'you and checked.',
               ),
               FilledButton(
                 onPressed: _busy || offline ? null : _submit,
@@ -167,7 +170,8 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'We send a 6-digit code to the number or email on your account.',
+                'We send a 6-digit code to the phone number or email on your '
+                'Communal account.',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
             ],

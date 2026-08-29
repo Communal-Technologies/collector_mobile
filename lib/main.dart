@@ -114,7 +114,7 @@ class _CollectorAppState extends State<CollectorApp> {
 /// doing. That is the whole point of the app: the roster and the standing are
 /// cached, a receipt is written to the phone first, and blocking the door would
 /// leave somebody standing in front of a collector who cannot write their receipt.
-/// Sign-in is the exception, because only the cooperative can send the code.
+/// Sign-in is the exception, because only Communal can send the code.
 class _Entry extends StatefulWidget {
   const _Entry();
 
