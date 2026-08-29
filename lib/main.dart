@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'core/config.dart';
@@ -18,6 +19,7 @@ import 'state/session_cubit.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
   runApp(const CollectorApp());
 }
 
