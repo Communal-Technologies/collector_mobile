@@ -43,6 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/build/
+/android/app/build/
 
 # Build-time configuration — the real values are per-machine and never committed
 tool/dart_defines.json
