@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The stock Flutter template declares this only in the debug and profile
+         manifests, so a release build has no network access and every request
+         fails as a socket error the app can only report as "no connection". -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
-        android:label="communal_collector"
+        android:label="Communal Collector"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
