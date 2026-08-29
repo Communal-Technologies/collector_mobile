@@ -20,6 +20,7 @@ dependencies:
   connectivity_plus: ^6.1.4
   intl: ^0.20.2
   google_fonts: ^6.3.2
+  flutter_screenutil: ^5.9.3
 
 dev_dependencies:
   flutter_test:
@@ -27,16 +28,17 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.1
 
-# Same generator and the same brand assets as the member app, so the two apps are
-# one family in the drawer. Regenerate with: dart run flutter_launcher_icons
+# Same generator, same mark and same white ground as the member app, but the mark
+# is inverted to black: the two apps sit next to each other in the drawer and the
+# purple one is the member's. Regenerate with: dart run flutter_launcher_icons
 flutter_launcher_icons:
   android: true
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/images/launcher_icon.png"
+  image_path: "assets/images/launcher_icon_black.png"
   background_color_android: "#FFFFFF"
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/launcher_icon_foreground.png"
+  adaptive_icon_foreground: "assets/images/launcher_icon_foreground_black.png"
   min_sdk_android: 21
 
 flutter:

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../core/config.dart';
 import '../core/theme.dart';
@@ -39,86 +40,96 @@ class SplashScreen extends StatelessWidget {
       ),
       child: Scaffold(
         backgroundColor: AppColors.primary,
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              children: [
-                const Spacer(),
-                const _LogoCircle(),
-                const SizedBox(height: 22),
-                const Text(
-                  AppConfig.appName,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
+        body: Stack(
+          children: [
+            const SplashGlows(),
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SplashLogoCircle(),
+                  SizedBox(height: 40.h),
+                  Text(
+                    AppConfig.appName,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34.sp,
+                      height: 1.15,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Collections on the round, signal or not.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                if (!AppConfig.isProduction) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
+                  SizedBox(height: 12.h),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 40.w),
                     child: Text(
-                      AppConfig.environment.toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
+                      'Collections on the round, signal or not',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        fontSize: 15.sp,
+                        letterSpacing: 0.3,
                       ),
                     ),
                   ),
+                  if (!AppConfig.isProduction) ...[
+                    SizedBox(height: 14.h),
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 10.w,
+                        vertical: 4.h,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        AppConfig.environment.toUpperCase(),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10.sp,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ),
+                  ],
+                  SizedBox(height: 40.h),
+                  const SplashLoader(),
                 ],
-                const Spacer(),
-                if (blocked)
-                  _Blocked(
-                    hasTransport: hasTransport,
-                    checking: checking,
-                    onRetry: onRetry,
-                  )
-                else
-                  const _Loading(),
-                const SizedBox(height: 36),
-              ],
+              ),
             ),
-          ),
+            if (blocked)
+              Positioned.fill(
+                child: SplashBlocked(
+                  hasTransport: hasTransport,
+                  checking: checking,
+                  onRetry: onRetry,
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// The member app's splash mark, at the member app's proportions: its circle is
-/// 200 of a 430-wide design and the mark inside is 140 of it, so both are taken
-/// off the real width rather than pinned to a number that only suits one phone.
-class _LogoCircle extends StatelessWidget {
-  const _LogoCircle();
+/// The member app's splash mark, at the member app's numbers: a 200 circle with a
+/// 140 mark inside it, on the same 430-wide design.
+///
+/// Public, like the other sized pieces of this screen, because ScreenUtilInit skips
+/// any widget whose type name begins with an underscore when it re-marks the tree
+/// after the real screen size arrives — a private one keeps whatever it measured on
+/// the first frame, which on this device is nothing at all.
+class SplashLogoCircle extends StatelessWidget {
+  const SplashLogoCircle({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final diameter = (MediaQuery.sizeOf(context).width * 200 / 430).clamp(
-      140.0,
-      220.0,
-    );
-
     return Container(
-      width: diameter,
-      height: diameter,
+      width: 200.w,
+      height: 200.w,
       decoration: BoxDecoration(
         color: Colors.white,
         shape: BoxShape.circle,
@@ -133,8 +144,85 @@ class _LogoCircle extends StatelessWidget {
       child: Center(
         child: Image.asset(
           'assets/images/icon-02.png',
-          width: diameter * 0.7,
+          width: 140.w,
           fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+}
+
+/// The member app's three colour washes behind the mark, at its positions. Its
+/// own version blurs them with a BackdropFilter; that layer took the white circle
+/// and the loader off this device's screen entirely, so the softness comes from the
+/// gradient stops instead.
+class SplashGlows extends StatelessWidget {
+  const SplashGlows({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SizedBox(
+        width: 400.w,
+        height: 650.h,
+        child: Stack(
+          children: [
+            Positioned(
+              top: 20.h,
+              right: 10.w,
+              child: SplashGlow(
+                size: 200.w,
+                inner: Colors.orange.withValues(alpha: 0.28),
+                outer: Colors.orange.withValues(alpha: 0.14),
+              ),
+            ),
+            Positioned(
+              top: 180.h,
+              left: 0,
+              child: SplashGlow(
+                size: 180.w,
+                inner: const Color(0xFFE0B0FF).withValues(alpha: 0.28),
+                outer: const Color(0xFFB09FFF).withValues(alpha: 0.14),
+              ),
+            ),
+            Positioned(
+              bottom: 50.h,
+              right: 20.w,
+              child: SplashGlow(
+                size: 190.w,
+                inner: Colors.cyan.withValues(alpha: 0.28),
+                outer: Colors.blue.withValues(alpha: 0.14),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SplashGlow extends StatelessWidget {
+  const SplashGlow({
+    super.key,
+    required this.size,
+    required this.inner,
+    required this.outer,
+  });
+
+  final double size;
+  final Color inner;
+  final Color outer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [inner, outer, Colors.transparent],
+          stops: const [0.0, 0.45, 1.0],
         ),
       ),
     );
@@ -147,14 +235,14 @@ class _LogoCircle extends StatelessWidget {
 /// colour boundary — so the same three colours are used here, on a segment that
 /// travels the track. A repeating controller read straight would jump at the seam;
 /// folding it into a triangle wave sends the segment out and back instead.
-class _Loading extends StatefulWidget {
-  const _Loading();
+class SplashLoader extends StatefulWidget {
+  const SplashLoader({super.key});
 
   @override
-  State<_Loading> createState() => _LoadingState();
+  State<SplashLoader> createState() => _SplashLoaderState();
 }
 
-class _LoadingState extends State<_Loading>
+class _SplashLoaderState extends State<SplashLoader>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
@@ -170,8 +258,8 @@ class _LoadingState extends State<_Loading>
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 120,
-      height: 4,
+      width: 120.w,
+      height: 4.h,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Colors.white24,
@@ -188,8 +276,8 @@ class _LoadingState extends State<_Loading>
               return Align(
                 alignment: Alignment(Curves.easeInOut.transform(t) * 2 - 1, 0),
                 child: Container(
-                  width: 44,
-                  height: 4,
+                  width: 44.w,
+                  height: 4.h,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(2),
                     gradient: const LinearGradient(
@@ -212,9 +300,11 @@ class _LoadingState extends State<_Loading>
 
 /// The hard stop. It says which of the two things is wrong, what the app is doing
 /// about it, and — because the retry is automatic — it is a button a collector may
-/// press rather than one they must.
-class _Blocked extends StatelessWidget {
-  const _Blocked({
+/// press rather than one they must. It covers the splash the way the member app's
+/// does, centred, rather than sitting under it.
+class SplashBlocked extends StatelessWidget {
+  const SplashBlocked({
+    super.key,
     required this.hasTransport,
     required this.checking,
     this.onRetry,
@@ -226,77 +316,88 @@ class _Blocked extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-          ),
+    return ColoredBox(
+      color: AppColors.primary.withValues(alpha: 0.97),
+      child: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 28.w),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                hasTransport ? Icons.cloud_off : Icons.signal_cellular_off,
-                color: AppColors.primary,
-                size: 30,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                hasTransport
-                    ? 'Cannot reach the cooperative'
-                    : 'No network on this phone',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                hasTransport
-                    ? 'You are connected to something, but it is not carrying us. '
-                          'Signing in needs the cooperative to send your code, so it '
-                          'has to wait. We keep trying.'
-                    : 'Turn on mobile data or wifi. Signing in needs the cooperative '
-                          'to send your code — once you are in, the app works without '
-                          'signal.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 13,
-                  height: 1.45,
-                  color: AppColors.muted,
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
+              Container(
                 width: double.infinity,
-                child: FilledButton(
-                  onPressed: checking ? null : onRetry,
-                  child: checking
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Try again'),
+                padding: EdgeInsets.all(18.w),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
                 ),
+                child: Column(
+                  children: [
+                    Icon(
+                      hasTransport
+                          ? Icons.cloud_off
+                          : Icons.signal_cellular_off,
+                      color: AppColors.primary,
+                      size: 30.sp,
+                    ),
+                    SizedBox(height: 12.h),
+                    Text(
+                      hasTransport
+                          ? 'Cannot reach the cooperative'
+                          : 'No network on this phone',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16.sp,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    SizedBox(height: 8.h),
+                    Text(
+                      hasTransport
+                          ? 'You are connected to something, but it is not carrying us. '
+                                'Signing in needs the cooperative to send your code, so it '
+                                'has to wait. We keep trying.'
+                          : 'Turn on mobile data or wifi. Signing in needs the cooperative '
+                                'to send your code — once you are in, the app works without '
+                                'signal.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13.sp,
+                        height: 1.45,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                    SizedBox(height: 16.h),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: checking ? null : onRetry,
+                        child: checking
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Try again'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 14.h),
+              Text(
+                'Receipts you already wrote are safe on this phone.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 12.sp),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        const Text(
-          'Receipts you already wrote are safe on this phone.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-      ],
+      ),
     );
   }
 }

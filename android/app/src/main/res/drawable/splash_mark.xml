@@ -1,23 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The mark Android 12+ centres on the system splash screen, on the white plate set
-     by windowSplashScreenIconBackgroundColor.
-     The plate's shape belongs to the device, not to this file: it is filled to the
-     launcher's icon mask, which is a rounded square on HiOS handsets and a circle on
-     stock Android. Drawing a white oval in here instead does not change that — the
-     mask still wins — so the Dart splash's circle is the shape the app controls and
-     this is the shape the phone does.
-     The transparent canvas is the padding: with a plate the platform uses a 240dp
-     icon slot and keeps the middle 160dp, and the mark is sized for that. -->
+<!-- The mark Android 12+ centres on the launch window: the white mark straight onto
+     the brand purple, the way the member app's launch window carries its mark with no
+     plate behind it. No plate also means no icon mask, and the mask was the only
+     reason a shape appeared here that the Dart splash does not draw.
+     The transparent canvas is the padding. The platform keeps the middle 192 of a
+     288dp icon, and the mark is well inside that so it reads at the same weight as
+     the one in the Dart splash rather than filling the screen. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <size android:width="240dp" android:height="240dp" />
+            <size android:width="288dp" android:height="288dp" />
             <solid android:color="@android:color/transparent" />
         </shape>
     </item>
     <item
-        android:width="128dp"
-        android:height="128dp"
-        android:drawable="@drawable/brand_mark"
+        android:width="104dp"
+        android:height="104dp"
+        android:drawable="@drawable/brand_mark_white"
         android:gravity="center" />
 </layer-list>

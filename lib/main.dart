@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import 'core/config.dart';
 import 'core/theme.dart';
@@ -85,11 +86,21 @@ class _CollectorAppState extends State<CollectorApp> {
           BlocProvider.value(value: _outbox),
           BlocProvider.value(value: _connectivity),
         ],
-        child: MaterialApp(
-          title: AppConfig.appName,
-          debugShowCheckedModeBanner: false,
-          theme: buildAppTheme(),
-          home: const _Entry(),
+        // The member app's design size, so a number written here means the same
+        // fraction of the screen in both apps.
+        child: ScreenUtilInit(
+          designSize: const Size(430, 932),
+          minTextAdapt: true,
+          // The first frame on this hardware arrives with a zero-sized view, and
+          // whatever is measured off it stays measured off it. Holding the frame
+          // until the view has a size is cheap — the launch window is still up.
+          ensureScreenSize: true,
+          builder: (context, child) => MaterialApp(
+            title: AppConfig.appName,
+            debugShowCheckedModeBanner: false,
+            theme: buildAppTheme(),
+            home: const _Entry(),
+          ),
         ),
       ),
     );
