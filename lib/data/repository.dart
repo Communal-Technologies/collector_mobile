@@ -19,9 +19,24 @@ class LoginResult {
   final CollectorProfile profile;
 }
 
+/// What the unlock check on launch came back with.
+enum UnlockCheck {
+  /// The PIN was right and the round can be opened.
+  ok,
+
+  /// The account has no PIN at all, so there was nothing to check. The collector
+  /// has to create one before the app is of any use to them.
+  needsPinSetup,
+}
+
 /// Sign-in. Three steps, because a collector arrives in one of two states: someone
 /// who is already a member of the cooperative has the 6-digit PIN every member has,
 /// and someone registered only as a collector has never set one and sets it here.
+///
+/// It also carries the two things a signed-in collector does with that PIN: proving
+/// it again on every launch, and resetting it when they have forgotten it. The reset
+/// is the member app's own three calls, because it is one PIN on one account — a
+/// collector who resets it here signs into the member app with the new one.
 class AuthRepository {
   AuthRepository(this._api);
 
@@ -75,6 +90,59 @@ class AuthRepository {
       profile: CollectorProfile.fromJson(
         (data['user'] as Map<String, dynamic>?) ?? const {},
       ),
+    );
+  }
+
+  /// Proves the PIN on a session that is already signed in. A wrong PIN throws;
+  /// an account that has never had one answers [UnlockCheck.needsPinSetup] rather
+  /// than failing, because that collector has to be sent somewhere, not refused.
+  Future<UnlockCheck> unlock(String pin) async {
+    final data = await _api.post(ApiPaths.unlock, body: {'pin': pin});
+    return data['requires_pin_setup'] == true
+        ? UnlockCheck.needsPinSetup
+        : UnlockCheck.ok;
+  }
+
+  /// Step one of the reset: a code to the phone number or email on the account.
+  /// Returns the server's own line about where it went.
+  Future<String> pinResetRequest(String login) async {
+    final data = await _api.post(
+      ApiPaths.pinResetRequest,
+      body: {'login': login, 'platform': AppConfig.platform},
+      anonymous: true,
+    );
+    return (data['message'] ?? '').toString();
+  }
+
+  /// Step two: the code, checked on its own so a wrong one is said now rather than
+  /// after the collector has chosen and confirmed a PIN.
+  Future<void> pinResetVerify({
+    required String login,
+    required String code,
+  }) async {
+    await _api.post(
+      ApiPaths.pinResetVerify,
+      body: {'login': login, 'pin': code, 'platform': AppConfig.platform},
+      anonymous: true,
+    );
+  }
+
+  /// Step three: the new PIN. This is the account's one PIN, so it is also the PIN
+  /// the member app will want from here on.
+  Future<void> pinResetSet({
+    required String login,
+    required String code,
+    required String newPin,
+  }) async {
+    await _api.put(
+      ApiPaths.pinResetSet,
+      body: {
+        'login': login,
+        'pin': code,
+        'new_password': newPin,
+        'platform': AppConfig.platform,
+      },
+      anonymous: true,
     );
   }
 }

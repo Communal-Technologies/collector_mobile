@@ -39,8 +39,12 @@ class ApiClient {
        _offlineCheck = offlineCheck,
        _onReachability = onReachability,
        _dio = dio ?? Dio() {
+    // An injected dio keeps its own origin; only a client that was handed none
+    // resolves the build's.
+    if (_dio.options.baseUrl.isEmpty) {
+      _dio.options.baseUrl = AppConfig.baseUrl;
+    }
     _dio.options
-      ..baseUrl = AppConfig.baseUrl
       ..connectTimeout = const Duration(seconds: 20)
       ..receiveTimeout = const Duration(seconds: 30)
       ..headers['Accept'] = 'application/json'
@@ -95,6 +99,18 @@ class ApiClient {
     bool anonymous = false,
   }) => _send(
     () => _dio.post(
+      path,
+      data: body,
+      options: Options(extra: {'anonymous': anonymous}),
+    ),
+  );
+
+  Future<Map<String, dynamic>> put(
+    String path, {
+    Map<String, dynamic>? body,
+    bool anonymous = false,
+  }) => _send(
+    () => _dio.put(
       path,
       data: body,
       options: Options(extra: {'anonymous': anonymous}),

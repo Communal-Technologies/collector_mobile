@@ -9,9 +9,11 @@ import 'core/config.dart';
 import 'core/theme.dart';
 import 'data/api_client.dart';
 import 'data/outbox.dart';
+import 'data/pin_lock.dart';
 import 'data/repository.dart';
 import 'data/session_store.dart';
 import 'screens/home_shell.dart';
+import 'screens/lock_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'state/connectivity_cubit.dart';
@@ -59,7 +61,12 @@ class _CollectorAppState extends State<CollectorApp> {
     );
     _auth = AuthRepository(_api);
     _repository = CollectorRepository(_api);
-    _session = SessionCubit(store: _store, repository: _repository);
+    _session = SessionCubit(
+      store: _store,
+      repository: _repository,
+      auth: _auth,
+      lock: PinLock(),
+    );
     _outbox = OutboxCubit(outbox: Outbox(), repository: _repository);
     _session.bootstrap();
     _outbox.load();
@@ -122,13 +129,24 @@ class _Entry extends StatefulWidget {
   State<_Entry> createState() => _EntryState();
 }
 
-class _EntryState extends State<_Entry> {
+class _EntryState extends State<_Entry> with WidgetsBindingObserver {
   /// The splash is held for a moment even when the session resolves instantly, so
   /// the app opens rather than flickering through a purple frame.
   static const _brandingHold = Duration(milliseconds: 1100);
 
+  /// How long the app may sit in the background before the PIN is asked for again.
+  ///
+  /// A launch always asks — that is [SessionCubit.bootstrap]. This is the other
+  /// half: closing the app is what locks it, and the phone cannot tell "closed" from
+  /// "the collector opened the camera to photograph a receipt, or answered the SMS
+  /// with the code in it". Locking on every glance elsewhere would make the app
+  /// unusable on a round; never locking would leave a round's takings open on a
+  /// phone in someone's pocket.
+  static const _backgroundGrace = Duration(minutes: 3);
+
   bool _held = true;
   Timer? _holdTimer;
+  DateTime? _leftAt;
 
   /// Once the sign-in form has been shown, losing signal must not snatch it away —
   /// a collector halfway through typing a phone number would lose it, and the form
@@ -138,6 +156,7 @@ class _EntryState extends State<_Entry> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _holdTimer = Timer(_brandingHold, () {
       if (mounted) setState(() => _held = false);
     });
@@ -145,20 +164,45 @@ class _EntryState extends State<_Entry> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _holdTimer?.cancel();
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        // Not `inactive`: that also fires for the notification shade and for a
+        // permission dialog, neither of which is leaving the app.
+        _leftAt ??= DateTime.now();
+      case AppLifecycleState.resumed:
+        final left = _leftAt;
+        _leftAt = null;
+        if (left != null &&
+            DateTime.now().difference(left) >= _backgroundGrace) {
+          context.read<SessionCubit>().lockNow();
+        }
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final status = context.select((SessionCubit c) => c.state.status);
+    final session = context.watch<SessionCubit>().state;
+    final status = session.status;
     final network = context.watch<ConnectivityCubit>().state;
 
     if (_held || status == SessionStatus.unknown) {
       return const SplashScreen();
     }
     if (status == SessionStatus.signedIn) {
-      return const HomeShell();
+      // The token says which account this is. The PIN is what says the phone is in
+      // the right hands, and it is asked for on every launch.
+      return session.locked ? const LockScreen() : const HomeShell();
     }
     if (network.isOffline && !_loginShown) {
       return SplashScreen(

@@ -17,6 +17,11 @@ class AppConfig {
   static const int otpLength = 6;
   static const int pinLength = 6;
 
+  /// Sent with the PIN reset calls so the surface is on the record. Every value
+  /// except `admin_app` resolves the same member account, which is the one a
+  /// collector has — Communal's own staff are the exception and are not collectors.
+  static const String platform = 'collector_app';
+
   static const String stagingApiBaseUrl = 'https://api-staging.communalhq.com';
   static const String productionApiBaseUrl = 'https://api.communalhq.com';
 
@@ -81,7 +86,14 @@ class ApiPaths {
   static const String loginRequest = '/api/v1/collector/login-request';
   static const String loginResend = '/api/v1/collector/login-resend';
   static const String loginVerify = '/api/v1/collector/login-verify';
+  static const String unlock = '/api/v1/collector/unlock';
   static const String refreshToken = '/api/v1/refresh-token';
+
+  /// The PIN reset is the member app's own three calls, not a collector copy of
+  /// them: it is one PIN on one account, so resetting it here resets it there.
+  static const String pinResetRequest = '/api/v1/generate-password-reset-link';
+  static const String pinResetVerify = '/api/v1/verify-password-reset-pin';
+  static const String pinResetSet = '/api/v1/reset-password';
 
   static const String _obl = '/api/obligations/v2/collector';
   static const String collections = '$_obl/collections';

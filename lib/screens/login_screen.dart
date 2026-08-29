@@ -8,6 +8,7 @@ import '../data/api_client.dart';
 import '../data/repository.dart';
 import '../state/session_cubit.dart';
 import '../widgets/common.dart';
+import 'forgot_pin_screen.dart';
 import 'verify_screen.dart';
 
 /// Step one of signing in: who is this, and do they already have a PIN.
@@ -52,14 +53,16 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = '';
     });
     try {
+      final pin = _pin.text.trim();
       final challenge = await context.read<AuthRepository>().loginRequest(
         login: login,
-        pin: _pin.text.trim(),
+        pin: pin,
       );
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => VerifyScreen(challenge: challenge, login: login),
+          builder: (_) =>
+              VerifyScreen(challenge: challenge, login: login, pin: pin),
         ),
       );
     } on ApiException catch (e) {
@@ -168,7 +171,21 @@ class _LoginScreenState extends State<LoginScreen> {
                         offline ? 'Waiting for a connection' : 'Send my code',
                       ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 6),
+              // A forgotten PIN stops the collector at this screen — the code is only
+              // sent once the PIN is accepted — so the way out has to be here.
+              TextButton(
+                onPressed: _busy || offline
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ForgotPinScreen(login: _login.text.trim()),
+                        ),
+                      ),
+                child: const Text('Forgot your PIN?'),
+              ),
+              const SizedBox(height: 10),
               const Text(
                 'We send a 6-digit code to the phone number or email on your '
                 'Communal account.',

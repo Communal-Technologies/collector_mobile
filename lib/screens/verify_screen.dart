@@ -17,10 +17,20 @@ import '../widgets/common.dart';
 /// carries it: a collector session is a session over one cooperative's round, on
 /// that cooperative's terms.
 class VerifyScreen extends StatefulWidget {
-  const VerifyScreen({super.key, required this.challenge, required this.login});
+  const VerifyScreen({
+    super.key,
+    required this.challenge,
+    required this.login,
+    this.pin = '',
+  });
 
   final LoginChallenge challenge;
   final String login;
+
+  /// What was typed on the sign-in screen. Carried through so the lock this app
+  /// opens with can be answered without a connection on the next launch — it is the
+  /// only point at which the app holds the PIN in the clear.
+  final String pin;
 
   @override
   State<VerifyScreen> createState() => _VerifyScreenState();
@@ -125,7 +135,10 @@ class _VerifyScreenState extends State<VerifyScreen> {
         newPin: newPin,
       );
       if (!mounted) return;
-      await context.read<SessionCubit>().completeLogin(result);
+      await context.read<SessionCubit>().completeLogin(
+        result,
+        pin: newPin ?? widget.pin,
+      );
       if (!mounted) return;
       // The session cubit decides what is on screen from here; this route and the
       // login screen under it are both done with.
