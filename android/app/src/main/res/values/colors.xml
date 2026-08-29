@@ -3,4 +3,5 @@
     <!-- The platform's action purple, repeated here because the launch window is
          painted by Android before any Dart runs. -->
     <color name="brand_purple">#742CE7</color>
+	<color name="ic_launcher_background">#FFFFFF</color>
 </resources>
