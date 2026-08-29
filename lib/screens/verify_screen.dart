@@ -61,9 +61,9 @@ class _VerifyScreenState extends State<VerifyScreen> {
     });
     try {
       final next = await context.read<AuthRepository>().loginResend(
-            challengeId: _challenge.challengeId,
-            channel: channel,
-          );
+        challengeId: _challenge.challengeId,
+        channel: channel,
+      );
       if (!mounted) return;
       setState(() {
         // The resend does not repeat the grants, so the ones already on screen and
@@ -90,7 +90,10 @@ class _VerifyScreenState extends State<VerifyScreen> {
   Future<void> _submit() async {
     final code = _code.text.trim();
     if (code.length < AppConfig.otpLength) {
-      setState(() => _error = 'Enter the ${AppConfig.otpLength}-digit code we sent you.');
+      setState(
+        () =>
+            _error = 'Enter the ${AppConfig.otpLength}-digit code we sent you.',
+      );
       return;
     }
     if (_collectorId.isEmpty) {
@@ -116,11 +119,11 @@ class _VerifyScreenState extends State<VerifyScreen> {
     });
     try {
       final result = await context.read<AuthRepository>().loginVerify(
-            challengeId: _challenge.challengeId,
-            code: code,
-            collectorId: _collectorId,
-            newPin: newPin,
-          );
+        challengeId: _challenge.challengeId,
+        code: code,
+        collectorId: _collectorId,
+        newPin: newPin,
+      );
       if (!mounted) return;
       await context.read<SessionCubit>().completeLogin(result);
       if (!mounted) return;
@@ -143,6 +146,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
   @override
   Widget build(BuildContext context) {
     final grants = _challenge.grants;
+    final offline = isOffline(context);
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(title: const Text('Confirm it is you')),
@@ -172,11 +176,15 @@ class _VerifyScreenState extends State<VerifyScreen> {
               Row(
                 children: [
                   TextButton(
-                    onPressed: _resending ? null : () => _resend('sms'),
+                    onPressed: _resending || offline
+                        ? null
+                        : () => _resend('sms'),
                     child: const Text('Resend by SMS'),
                   ),
                   TextButton(
-                    onPressed: _resending ? null : () => _resend('email'),
+                    onPressed: _resending || offline
+                        ? null
+                        : () => _resend('email'),
                     child: const Text('Send by email'),
                   ),
                 ],
@@ -206,14 +214,18 @@ class _VerifyScreenState extends State<VerifyScreen> {
                   title: grants.first.cooperativeName,
                   child: Text(
                     '${grants.first.collectorCode} · ${grants.first.commissionLabel}',
-                    style: const TextStyle(fontSize: 13, color: AppColors.muted),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.muted,
+                    ),
                   ),
                 ),
               ],
               if (_challenge.requiresPinSetup) ...[
                 const SizedBox(height: 20),
                 const Notice(
-                  text: 'You have no PIN yet. Choose one now — it is what you will '
+                  text:
+                      'You have no PIN yet. Choose one now — it is what you will '
                       'sign in with from here on, and it is the same PIN if this '
                       'account ever uses the member app.',
                 ),
@@ -252,16 +264,23 @@ class _VerifyScreenState extends State<VerifyScreen> {
                 ),
               ],
               const SizedBox(height: 24),
+              const OfflineNotice(
+                reason:
+                    'The code can only be checked by the cooperative, so this '
+                    'last step needs a connection.',
+              ),
               FilledButton(
-                onPressed: _busy ? null : _submit,
+                onPressed: _busy || offline ? null : _submit,
                 child: _busy
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
-                    : const Text('Sign in'),
+                    : Text(offline ? 'Waiting for a connection' : 'Sign in'),
               ),
             ],
           ),
@@ -312,7 +331,10 @@ class _GrantChoice extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       '${grant.collectorCode} · ${grant.commissionLabel}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ],
                 ),

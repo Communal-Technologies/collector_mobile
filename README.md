@@ -45,10 +45,27 @@ are exactly the parts where members cannot use the app themselves. So:
 - The queue is sent oldest-first, one at a time, on connectivity change, on app
   resume, on pull-to-refresh and right after recording. Order matters: the server
   checks each collection against what the collector is already holding.
+- Whether the cooperative can be reached is checked with a TCP connect to the API host
+  itself — not a ping to a public address, which cannot tell "no signal" apart from
+  "signal that carries nothing" — re-checked on every transport change, every 15s while
+  down, and corrected by what real requests learn. A request made while it is known to
+  be down fails at once instead of after a 20-second connect timeout.
 - The receipt number is `<install-salt>-<counter>`. The counter is what the collector
   reads out to the member; the salt is what stops a reinstall restarting the counter
   onto numbers the server has already filed, which would make a real collection
   resolve as an idempotent resend and vanish.
+
+### What a lost connection blocks
+
+Almost nothing, and that is deliberate. The splash is the only hard gate and it closes
+on one case: **signed out with no connection**, because only the cooperative can send a
+sign-in code. Beyond it, the block is per action, on the three that cannot be queued —
+sign-in, the code at verify, declaring a remittance — each with a notice saying why.
+
+A signed-in collector is never stopped. The round, a member's obligations and the
+standing come from the cache, a receipt goes to the outbox, and the shell carries a
+banner saying the figures are off the phone. When the connection returns the queue is
+sent without being asked.
 
 ## Running it
 

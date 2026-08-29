@@ -1,12 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- Same as drawable/launch_background.xml. The v21 copy exists because Flutter's
+     template points the launch theme here on API 21+, and the stock version deferred
+     to ?android:colorBackground — which is white, or black in dark mode. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <item android:drawable="@color/brand_purple" />
 </layer-list>

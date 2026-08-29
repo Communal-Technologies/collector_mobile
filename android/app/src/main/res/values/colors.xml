@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The platform's action purple, repeated here because the launch window is
+         painted by Android before any Dart runs. -->
+    <color name="brand_purple">#742CE7</color>
+</resources>

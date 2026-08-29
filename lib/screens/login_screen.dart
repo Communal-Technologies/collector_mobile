@@ -39,7 +39,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submit() async {
     final login = _login.text.trim();
     if (login.isEmpty) {
-      setState(() => _error = 'Enter the phone number or email the cooperative registered you with.');
+      setState(
+        () => _error =
+            'Enter the phone number or email the cooperative registered you with.',
+      );
       return;
     }
     setState(() {
@@ -48,9 +51,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       final challenge = await context.read<AuthRepository>().loginRequest(
-            login: login,
-            pin: _pin.text.trim(),
-          );
+        login: login,
+        pin: _pin.text.trim(),
+      );
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -67,6 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final notice = context.select((SessionCubit c) => c.state.notice);
+    final offline = isOffline(context);
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -83,8 +87,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.account_balance_wallet_outlined,
-                    color: AppColors.primary, size: 28),
+                child: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: AppColors.primary,
+                  size: 28,
+                ),
               ),
               const SizedBox(height: 20),
               const Text(
@@ -138,16 +145,25 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
               const SizedBox(height: 22),
+              const OfflineNotice(
+                reason:
+                    'Signing in needs a connection — only the cooperative can '
+                    'send your code.',
+              ),
               FilledButton(
-                onPressed: _busy ? null : _submit,
+                onPressed: _busy || offline ? null : _submit,
                 child: _busy
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
-                    : const Text('Send my code'),
+                    : Text(
+                        offline ? 'Waiting for a connection' : 'Send my code',
+                      ),
               ),
               const SizedBox(height: 16),
               const Text(

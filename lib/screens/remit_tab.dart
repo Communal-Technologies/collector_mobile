@@ -77,7 +77,9 @@ class _RemitTabState extends State<RemitTab> {
     }
     final accountId = _accountId;
     if (accountId == null) {
-      setState(() => _error = 'Choose the account you are paying the cash into.');
+      setState(
+        () => _error = 'Choose the account you are paying the cash into.',
+      );
       return;
     }
     setState(() {
@@ -86,11 +88,11 @@ class _RemitTabState extends State<RemitTab> {
     });
     try {
       await context.read<CollectorRepository>().createRemittance(
-            cooperativeId: widget.grant.cooperativeId,
-            toRepositoryId: accountId,
-            amount: amount,
-            narration: _narration.text.trim(),
-          );
+        cooperativeId: widget.grant.cooperativeId,
+        toRepositoryId: accountId,
+        amount: amount,
+        narration: _narration.text.trim(),
+      );
       if (!mounted) return;
       _amount.clear();
       _narration.clear();
@@ -142,6 +144,7 @@ class _RemitTabState extends State<RemitTab> {
           final typed = moneyFieldMinor(_amount);
           final overCash =
               data.standing != null && typed > data.standing!.cashInHand;
+          final offline = isOffline(context);
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
             children: [
@@ -157,7 +160,8 @@ class _RemitTabState extends State<RemitTab> {
                       ),
                       AmountRow(
                         label: 'Declared, not yet approved',
-                        sublabel: '${data.standing!.pendingCount} receipt'
+                        sublabel:
+                            '${data.standing!.pendingCount} receipt'
                             '${data.standing!.pendingCount == 1 ? '' : 's'} waiting',
                         amount: data.standing!.pendingTotal,
                       ),
@@ -178,7 +182,8 @@ class _RemitTabState extends State<RemitTab> {
                   children: [
                     if (data.accounts.isEmpty)
                       const Notice(
-                        text: 'Your cooperative has not opened an account for you to '
+                        text:
+                            'Your cooperative has not opened an account for you to '
                             'pay into. Ask an administrator to set one up before you '
                             'hand cash over.',
                         icon: Icons.info_outline,
@@ -209,9 +214,10 @@ class _RemitTabState extends State<RemitTab> {
                           alignment: Alignment.centerLeft,
                           child: TextButton(
                             onPressed: () {
-                              _amount.text = (data.standing!.cashInHand ~/
-                                      Money.minorPerMajor)
-                                  .toString();
+                              _amount.text =
+                                  (data.standing!.cashInHand ~/
+                                          Money.minorPerMajor)
+                                      .toString();
                               setState(() {});
                             },
                             child: Text(
@@ -231,7 +237,8 @@ class _RemitTabState extends State<RemitTab> {
                       if (overCash) ...[
                         const SizedBox(height: 12),
                         Notice(
-                          text: 'That is more than the '
+                          text:
+                              'That is more than the '
                               '${Money.format(data.standing!.cashInHand)} the '
                               'cooperative has you down as holding. Check the figure — '
                               'they may not accept it.',
@@ -248,8 +255,14 @@ class _RemitTabState extends State<RemitTab> {
                         ),
                       ],
                       const SizedBox(height: 14),
+                      const OfflineNotice(
+                        reason:
+                            'A hand-in has to reach the cooperative to be '
+                            'counted, so it cannot be queued on this phone like a '
+                            'receipt can.',
+                      ),
                       FilledButton(
-                        onPressed: _submitting || typed <= 0
+                        onPressed: _submitting || typed <= 0 || offline
                             ? null
                             : () => _submit(data),
                         child: _submitting
@@ -257,18 +270,27 @@ class _RemitTabState extends State<RemitTab> {
                                 height: 20,
                                 width: 20,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
-                            : Text(typed <= 0
-                                ? 'Enter an amount'
-                                : 'Declare ${Money.format(typed)}'),
+                            : Text(
+                                offline
+                                    ? 'Waiting for a connection'
+                                    : typed <= 0
+                                    ? 'Enter an amount'
+                                    : 'Declare ${Money.format(typed)}',
+                              ),
                       ),
                       const SizedBox(height: 8),
                       const Text(
                         'This comes off your float only once an administrator confirms '
                         'the cash. Until then you are still down as holding it.',
                         style: TextStyle(
-                            fontSize: 12, color: AppColors.muted, height: 1.35),
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          height: 1.35,
+                        ),
                       ),
                     ],
                   ],
@@ -284,7 +306,10 @@ class _RemitTabState extends State<RemitTab> {
                       )
                     : Column(
                         children: data.remittances
-                            .map((remittance) => _RemittanceRow(remittance: remittance))
+                            .map(
+                              (remittance) =>
+                                  _RemittanceRow(remittance: remittance),
+                            )
                             .toList(),
                       ),
               ),
@@ -380,7 +405,9 @@ class _AccountChoice extends StatelessWidget {
                       Text(
                         account.accountType.replaceAll('_', ' '),
                         style: const TextStyle(
-                            fontSize: 12, color: AppColors.muted),
+                          fontSize: 12,
+                          color: AppColors.muted,
+                        ),
                       ),
                   ],
                 ),
@@ -416,12 +443,16 @@ class _RemittanceRow extends StatelessWidget {
                           ? remittance.reference
                           : remittance.toAccountName,
                       style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 14),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
                     ),
                     Text(
                       Dates.dayTime(remittance.createdAt),
-                      style:
-                          const TextStyle(fontSize: 12, color: AppColors.muted),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ],
                 ),
@@ -432,7 +463,9 @@ class _RemittanceRow extends StatelessWidget {
                   Text(
                     Money.format(remittance.amount),
                     style: const TextStyle(
-                        fontWeight: FontWeight.w800, fontSize: 14),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   StatusChip(remittance.status),

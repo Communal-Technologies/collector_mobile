@@ -5,6 +5,7 @@ import '../core/money.dart';
 import '../core/theme.dart';
 import '../data/models.dart';
 import '../data/repository.dart';
+import '../state/connectivity_cubit.dart';
 import '../state/outbox_cubit.dart';
 import '../state/session_cubit.dart';
 import '../widgets/common.dart';
@@ -110,8 +111,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         content: Text(
           unsent > 0
               ? 'You have $unsent ${unsent == 1 ? 'receipt' : 'receipts'} that have not reached '
-                  'the cooperative yet. They stay on this phone and go up the next time you '
-                  'sign in with signal — but nobody at the cooperative can see them until then.'
+                    'the cooperative yet. They stay on this phone and go up the next time you '
+                    'sign in with signal — but nobody at the cooperative can see them until then.'
               : 'You will need your PIN and a new code to sign back in.',
         ),
         actions: [
@@ -146,6 +147,39 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       EarningsTab(grant: grant, revision: _revision),
     ];
 
+    return BlocListener<ConnectivityCubit, ConnectivityState>(
+      listenWhen: (a, b) => a.reachability != b.reachability,
+      listener: (context, network) {
+        if (!network.isOnline) return;
+        // Signal came back. Send the queue without being asked — the collector has
+        // walked on, and the receipts are owed to the cooperative either way.
+        context.read<OutboxCubit>().flush();
+        final queued = context.read<OutboxCubit>().state.queued.length;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.success,
+              duration: const Duration(seconds: 3),
+              content: Text(
+                queued > 0
+                    ? 'Back online. Sending $queued ${queued == 1 ? 'receipt' : 'receipts'}.'
+                    : 'Back online.',
+              ),
+            ),
+          );
+        _refresh();
+      },
+      child: _buildShell(context, session, grant, tabs),
+    );
+  }
+
+  Widget _buildShell(
+    BuildContext context,
+    SessionState session,
+    CollectorGrant grant,
+    List<Widget> tabs,
+  ) {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
@@ -181,6 +215,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       body: Column(
         children: [
           _StandingHeader(grant: grant, revision: _revision),
+          const _ConnectionBanner(),
           const _OutboxBanner(),
           Expanded(child: tabs[_tab]),
         ],
@@ -235,7 +270,8 @@ class _StandingHeader extends StatelessWidget {
         final standing = snapshot.data;
         final limit = standing?.cashLimitMinor ?? grant.cashLimitMinor;
         final headroom = standing?.headroom;
-        final tight = limit != null &&
+        final tight =
+            limit != null &&
             headroom != null &&
             limit > 0 &&
             headroom <= limit ~/ 10;
@@ -252,9 +288,7 @@ class _StandingHeader extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                standing == null
-                    ? '—'
-                    : Money.format(standing.cashInHand),
+                standing == null ? '—' : Money.format(standing.cashInHand),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 30,
@@ -277,7 +311,10 @@ class _StandingHeader extends StatelessWidget {
               if (limit != null) ...[
                 const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: tight ? Colors.white : Colors.white24,
                     borderRadius: BorderRadius.circular(999),
@@ -286,7 +323,7 @@ class _StandingHeader extends StatelessWidget {
                     headroom == null
                         ? 'Limit ${Money.formatWhole(limit)}'
                         : 'Limit ${Money.formatWhole(limit)} · '
-                            '${Money.format(headroom)} left before you must remit',
+                              '${Money.format(headroom)} left before you must remit',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
@@ -296,6 +333,74 @@ class _StandingHeader extends StatelessWidget {
                 ),
               ],
             ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Whether this phone can reach the cooperative right now.
+///
+/// It informs, it does not stop: a collector with no signal can still open a
+/// member, write a receipt and read yesterday's figures. What it must do is say so
+/// plainly, because the collector is about to read a number out to somebody and is
+/// entitled to know it came off the phone.
+class _ConnectionBanner extends StatelessWidget {
+  const _ConnectionBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<ConnectivityCubit, ConnectivityState>(
+      builder: (context, network) {
+        if (!network.isOffline) return const SizedBox.shrink();
+        return Material(
+          color: AppColors.surface,
+          child: InkWell(
+            onTap: () => context.read<ConnectivityCubit>().recheck(),
+            child: Container(
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: AppColors.line)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    network.hasTransport
+                        ? Icons.cloud_off
+                        : Icons.signal_cellular_off,
+                    size: 18,
+                    color: AppColors.muted,
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Working offline. Keep collecting — figures are from this phone.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ),
+                  if (network.checking)
+                    const SizedBox(
+                      height: 14,
+                      width: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    const Text(
+                      'Check',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -316,8 +421,7 @@ class _OutboxBanner extends StatelessWidget {
         final rejected = state.rejected.length;
         if (queued == 0 && rejected == 0) return const SizedBox.shrink();
         final parts = <String>[
-          if (queued > 0)
-            '$queued unsent (${Money.format(state.queuedTotal)})',
+          if (queued > 0) '$queued unsent (${Money.format(state.queuedTotal)})',
           if (rejected > 0) '$rejected refused',
         ];
         return Material(
@@ -340,7 +444,9 @@ class _OutboxBanner extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: rejected > 0 ? AppColors.danger : AppColors.warning,
+                        color: rejected > 0
+                            ? AppColors.danger
+                            : AppColors.warning,
                       ),
                     ),
                   ),
@@ -356,7 +462,9 @@ class _OutboxBanner extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: rejected > 0 ? AppColors.danger : AppColors.warning,
+                        color: rejected > 0
+                            ? AppColors.danger
+                            : AppColors.warning,
                       ),
                     ),
                 ],

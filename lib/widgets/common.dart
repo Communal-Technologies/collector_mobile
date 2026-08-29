@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../core/money.dart';
 import '../core/theme.dart';
+import '../state/connectivity_cubit.dart';
 
 /// A titled white panel. Every screen in the app is a stack of these.
 class SectionCard extends StatelessWidget {
@@ -242,6 +244,48 @@ class Notice extends StatelessWidget {
   }
 }
 
+/// Shown above the button of an action that cannot be queued — signing in, the code
+/// at verify, declaring a remittance. Recording a collection never carries one: that
+/// goes to the outbox, so it works with no signal at all.
+///
+/// It appears only while the app knows the platform is unreachable, and tapping it
+/// checks again rather than making the collector wait out the 15-second cycle.
+class OfflineNotice extends StatelessWidget {
+  const OfflineNotice({super.key, required this.reason});
+
+  /// Why this particular action needs the connection, in the collector's terms.
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<ConnectivityCubit, ConnectivityState>(
+      builder: (context, network) {
+        if (!network.isOffline) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => context.read<ConnectivityCubit>().recheck(),
+            child: Notice(
+              text: network.checking
+                  ? 'Checking for a connection…'
+                  : '$reason Tap here to check again.',
+              icon: network.hasTransport
+                  ? Icons.cloud_off
+                  : Icons.signal_cellular_off,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// True when the app knows the platform cannot be reached, for the screens that must
+/// hold an action back until it can.
+bool isOffline(BuildContext context) =>
+    context.watch<ConnectivityCubit>().state.isOffline;
+
 /// Groups digits as the collector types, so a five-figure amount can be read back
 /// at a glance. The field's value is always major units; the caller converts.
 class MoneyInputFormatter extends TextInputFormatter {
@@ -347,7 +391,10 @@ class AmountRow extends StatelessWidget {
                 if (sublabel != null)
                   Text(
                     sublabel!,
-                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.muted,
+                    ),
                   ),
               ],
             ),

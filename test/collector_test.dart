@@ -1,8 +1,12 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:communal_collector/core/money.dart';
 import 'package:communal_collector/data/models.dart';
 import 'package:communal_collector/data/outbox.dart';
+import 'package:communal_collector/state/connectivity_cubit.dart';
 
 void main() {
   group('Money', () {
@@ -20,23 +24,26 @@ void main() {
   });
 
   group('MemberObligation', () {
-    test('falls back to the account code when the cooperative named nothing', () {
-      final named = MemberObligation.fromJson({
-        'account_code': 'Bco-C-997724',
-        'account_name': 'Monthly Savings',
-        'amount': 500000,
-        'amount_paid': 200000,
-      });
-      final unnamed = MemberObligation.fromJson({
-        'account_code': 'Bco-C-997724',
-        'amount': 500000,
-        'amount_paid': 600000,
-      });
-      expect(named.title, 'Monthly Savings');
-      expect(named.outstanding, 300000);
-      expect(unnamed.title, 'Bco-C-997724');
-      expect(unnamed.outstanding, 0);
-    });
+    test(
+      'falls back to the account code when the cooperative named nothing',
+      () {
+        final named = MemberObligation.fromJson({
+          'account_code': 'Bco-C-997724',
+          'account_name': 'Monthly Savings',
+          'amount': 500000,
+          'amount_paid': 200000,
+        });
+        final unnamed = MemberObligation.fromJson({
+          'account_code': 'Bco-C-997724',
+          'amount': 500000,
+          'amount_paid': 600000,
+        });
+        expect(named.title, 'Monthly Savings');
+        expect(named.outstanding, 300000);
+        expect(unnamed.title, 'Bco-C-997724');
+        expect(unnamed.outstanding, 0);
+      },
+    );
   });
 
   group('PendingCollection', () {
@@ -107,20 +114,116 @@ void main() {
         }).commissionLabel,
         '₦500.00 per collection',
       );
-      expect(CollectorGrant.fromJson(const {}).commissionLabel, 'No commission');
+      expect(
+        CollectorGrant.fromJson(const {}).commissionLabel,
+        'No commission',
+      );
     });
 
     test('posts on collection only when the cooperative said so', () {
       expect(
-        CollectorGrant.fromJson({'settlement_mode': 'on_collection'})
-            .postsOnCollection,
+        CollectorGrant.fromJson({
+          'settlement_mode': 'on_collection',
+        }).postsOnCollection,
         isTrue,
       );
       expect(
-        CollectorGrant.fromJson({'settlement_mode': 'on_remittance'})
-            .postsOnCollection,
+        CollectorGrant.fromJson({
+          'settlement_mode': 'on_remittance',
+        }).postsOnCollection,
         isFalse,
       );
+    });
+  });
+
+  group('ConnectivityCubit', () {
+    late StreamController<List<ConnectivityResult>> transport;
+    ConnectivityCubit? cubit;
+
+    setUp(() => transport = StreamController<List<ConnectivityResult>>());
+    tearDown(() async {
+      await cubit?.close();
+      await transport.close();
+    });
+
+    ConnectivityCubit build({
+      required Future<bool> Function() probe,
+      List<ConnectivityResult> carrying = const [ConnectivityResult.mobile],
+    }) {
+      cubit = ConnectivityCubit(
+        transportChanges: transport.stream,
+        checkTransport: () async => carrying,
+        probe: probe,
+        retryInterval: const Duration(hours: 1),
+      );
+      return cubit!;
+    }
+
+    test('starts unknown so nothing is blocked before the first check', () {
+      final c = build(probe: () async => true);
+      expect(c.state.reachability, Reachability.unknown);
+      expect(c.state.isOffline, isFalse);
+    });
+
+    test('a reachable host is online', () async {
+      final c = build(probe: () async => true);
+      await c.recheck();
+      expect(c.state.isOnline, isTrue);
+    });
+
+    test(
+      'signal that reaches nothing is offline, but with a transport',
+      () async {
+        final c = build(probe: () async => false);
+        await c.recheck();
+        expect(c.state.isOffline, isTrue);
+        expect(c.state.hasTransport, isTrue);
+      },
+    );
+
+    test('no transport is offline without probing at all', () async {
+      var probed = 0;
+      final c = build(
+        probe: () async {
+          probed++;
+          return true;
+        },
+      );
+      await c.recheck();
+      final before = probed;
+
+      transport.add(const [ConnectivityResult.none]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.state.isOffline, isTrue);
+      expect(c.state.hasTransport, isFalse);
+      expect(probed, before);
+    });
+
+    test('a real request outranks the probe', () async {
+      final c = build(probe: () async => true);
+      await c.recheck();
+
+      c.markReachability(false);
+      expect(c.state.isOffline, isTrue);
+
+      c.markReachability(true);
+      expect(c.state.isOnline, isTrue);
+    });
+
+    test('waiting for the platform gives up when told to', () async {
+      final c = build(probe: () async => false);
+      await c.recheck();
+      final reachable = await c.waitUntilReachable(
+        timeout: const Duration(milliseconds: 60),
+      );
+      expect(reachable, isFalse);
+    });
+
+    test('waiting returns at once when there is nothing to wait for', () async {
+      final c = build(probe: () async => true);
+      await c.recheck();
+      expect(await c.waitUntilReachable(), isTrue);
     });
   });
 

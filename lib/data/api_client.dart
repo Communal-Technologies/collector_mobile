@@ -29,9 +29,16 @@ class ApiException implements Exception {
 
 /// The HTTP client. One dio instance, one refresh in flight at a time.
 class ApiClient {
-  ApiClient(this.session, {Dio? dio, Future<void> Function()? onSessionExpired})
-      : _onSessionExpired = onSessionExpired,
-        _dio = dio ?? Dio() {
+  ApiClient(
+    this.session, {
+    Dio? dio,
+    Future<void> Function()? onSessionExpired,
+    bool Function()? offlineCheck,
+    void Function(bool reachable)? onReachability,
+  }) : _onSessionExpired = onSessionExpired,
+       _offlineCheck = offlineCheck,
+       _onReachability = onReachability,
+       _dio = dio ?? Dio() {
     _dio.options
       ..baseUrl = AppConfig.baseUrl
       ..connectTimeout = const Duration(seconds: 20)
@@ -39,19 +46,32 @@ class ApiClient {
       ..headers['Accept'] = 'application/json'
       ..validateStatus = (status) => status != null && status < 500;
     _dio.interceptors.add(
-      InterceptorsWrapper(onRequest: (options, handler) {
-        final token = session.accessToken;
-        if ((token ?? '').isNotEmpty && options.extra['anonymous'] != true) {
-          options.headers[HttpHeaders.authorizationHeader] = 'Bearer $token';
-        }
-        handler.next(options);
-      }),
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final token = session.accessToken;
+          if ((token ?? '').isNotEmpty && options.extra['anonymous'] != true) {
+            options.headers[HttpHeaders.authorizationHeader] = 'Bearer $token';
+          }
+          handler.next(options);
+        },
+      ),
     );
   }
 
   final SessionStore session;
   final Dio _dio;
   final Future<void> Function()? _onSessionExpired;
+
+  /// Asked before every request so a known-dead network fails at once instead of
+  /// after a 20-second connect timeout. It changes no outcome — the failure is the
+  /// same transport failure, so the outbox still keeps the receipt and the cached
+  /// reads still fall back — it only stops a collector watching a spinner for
+  /// something the app already knows cannot work.
+  final bool Function()? _offlineCheck;
+
+  /// Told what each request learned. A reply proves the platform is reachable and a
+  /// transport failure proves it is not, which is better evidence than any probe.
+  final void Function(bool reachable)? _onReachability;
 
   /// Shared by every request that meets a 401 at the same moment, so a signal
   /// coming back after a long walk does not fire six refreshes at once.
@@ -61,45 +81,60 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? query,
     bool anonymous = false,
-  }) =>
-      _send(() => _dio.get(
-            path,
-            queryParameters: query,
-            options: Options(extra: {'anonymous': anonymous}),
-          ));
+  }) => _send(
+    () => _dio.get(
+      path,
+      queryParameters: query,
+      options: Options(extra: {'anonymous': anonymous}),
+    ),
+  );
 
   Future<Map<String, dynamic>> post(
     String path, {
     Map<String, dynamic>? body,
     bool anonymous = false,
-  }) =>
-      _send(() => _dio.post(
-            path,
-            data: body,
-            options: Options(extra: {'anonymous': anonymous}),
-          ));
+  }) => _send(
+    () => _dio.post(
+      path,
+      data: body,
+      options: Options(extra: {'anonymous': anonymous}),
+    ),
+  );
 
   Future<Map<String, dynamic>> _send(
     Future<Response<dynamic>> Function() call, {
     bool retried = false,
   }) async {
+    if (_offlineCheck?.call() ?? false) {
+      throw ApiException('No connection. Nothing was sent.', offline: true);
+    }
+
     Response<dynamic> response;
     try {
       response = await call();
     } on DioException catch (e) {
-      throw _transportFailure(e);
+      final failure = _transportFailure(e);
+      if (failure.isTransport) _onReachability?.call(false);
+      throw failure;
     }
+    _onReachability?.call(true);
 
     final status = response.statusCode ?? 0;
     if (status == 401 && !retried) {
       final refreshed = await _ensureRefreshed();
       if (refreshed) return _send(call, retried: true);
       await _endSession();
-      throw ApiException('Your session has ended. Please sign in again.', statusCode: 401);
+      throw ApiException(
+        'Your session has ended. Please sign in again.',
+        statusCode: 401,
+      );
     }
     if (status == 401) {
       await _endSession();
-      throw ApiException('Your session has ended. Please sign in again.', statusCode: 401);
+      throw ApiException(
+        'Your session has ended. Please sign in again.',
+        statusCode: 401,
+      );
     }
     final data = response.data;
     final map = data is Map<String, dynamic> ? data : <String, dynamic>{};
@@ -124,17 +159,21 @@ class ApiClient {
     if ((token ?? '').isEmpty) return false;
     try {
       // A bare client: the refresh must not recurse through the 401 handling above.
-      final bare = Dio(BaseOptions(
-        baseUrl: AppConfig.baseUrl,
-        headers: const {'Accept': 'application/json'},
-        validateStatus: (status) => status != null && status < 500,
-      ));
+      final bare = Dio(
+        BaseOptions(
+          baseUrl: AppConfig.baseUrl,
+          headers: const {'Accept': 'application/json'},
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
       final response = await bare.post(
         ApiPaths.refreshToken,
         data: {'refresh_token': token},
       );
       final data = response.data;
-      if (response.statusCode != 200 || data is! Map<String, dynamic>) return false;
+      if (response.statusCode != 200 || data is! Map<String, dynamic>) {
+        return false;
+      }
       final access = (data['token'] ?? '').toString();
       final next = (data['refresh_token'] ?? '').toString();
       if (access.isEmpty || next.isEmpty) return false;
@@ -161,10 +200,7 @@ class ApiClient {
         );
       case DioExceptionType.connectionError:
       case DioExceptionType.unknown:
-        return ApiException(
-          'No connection. Nothing was sent.',
-          offline: true,
-        );
+        return ApiException('No connection. Nothing was sent.', offline: true);
       case DioExceptionType.badResponse:
         final data = e.response?.data;
         final map = data is Map<String, dynamic> ? data : <String, dynamic>{};
