@@ -101,11 +101,22 @@ class SessionCubit extends Cubit<SessionState> {
 
   /// Re-reads the grants. A grant the cooperative revoked disappears; if it was the
   /// active one, the app falls back to another rather than sitting on a dead one.
+  ///
+  /// An empty list is the server saying every grant is gone. That is worth acting
+  /// on: left signed in, the collector would keep writing receipts that are refused
+  /// with a 403 they have no way to read. A transport failure is a different thing
+  /// and lands in the catch, where the stored grant stands.
   Future<void> refreshGrants() async {
     if (state.status != SessionStatus.signedIn) return;
     try {
       final grants = await _repository.myGrants();
-      if (grants.isEmpty) return;
+      if (grants.isEmpty) {
+        await signOut(
+          notice: 'Your cooperative has ended your collector account. Anything you '
+              'still owe them is settled with an administrator directly.',
+        );
+        return;
+      }
       await _store.saveGrants(grants);
       final current = state.grant;
       final match = grants.firstWhere(
