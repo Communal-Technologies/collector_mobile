@@ -27,9 +27,14 @@
 # production runs. pubspec is the floor, so a manual bump is still honoured.
 # versionCode comes from github.run_number, which Play requires to be monotonic.
 #
-# Public download URLs (the `collector-<env>-latest` tag is repointed every run):
-#   https://github.com/<mirror>/releases/download/collector-staging-latest/communal-collector-staging.apk
-#   https://github.com/<mirror>/releases/download/collector-prod-latest/communal-collector-prod.apk
+# Every run publishes two assets to its own versioned tag — the versioned APK and
+# a stable-named copy — and the run summary prints the URL:
+#   https://github.com/<mirror>/releases/download/collector-staging-v<ver>-<build>/communal-collector-staging.apk
+#
+# It also repoints a `collector-<env>-latest` tag, which only works while the
+# mirror has GitHub's "immutable releases" setting OFF. Immutability reserves a
+# tag name forever, so the pointer cannot be recreated after its first build; the
+# step warns rather than failing, and the versioned URL above is unaffected.
 #
 # Keeps the 5 most recent mirror releases per environment; older ones are deleted.
 #
@@ -357,6 +362,7 @@ jobs:
           # tag permanently, so the recreate fails with HTTP 422. Warn and keep
           # going rather than failing the build: the versioned release above
           # already carries the stable-named asset.
+          POINTER_OK=true
           if gh release view "$LATEST_TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release delete "$LATEST_TAG" --repo "$REPO" --yes --cleanup-tag || true
           fi
@@ -365,17 +371,29 @@ jobs:
             --title "Latest ${ENV_TAG} collector build" \
             --notes "Always points at the most recent ${ENV_TAG} collector build. Direct link: https://github.com/${REPO}/releases/download/${LATEST_TAG}/${STABLE_NAME}" \
             "$STABLE_NAME"; then
+            POINTER_OK=false
             echo "::warning::Could not refresh the ${LATEST_TAG} pointer — this happens when '${REPO}' has immutable releases enabled. Turn that setting off to restore the ${LATEST_TAG} download link."
           fi
 
           LATEST_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/${STABLE_NAME}"
           VERSIONED_URL="https://github.com/${REPO}/releases/download/${BUILD_TAG}/${VERSIONED_NAME}"
+          # The download link the rest of the workflow quotes has to be one that
+          # resolves, so it is the versioned URL whenever the pointer is dead.
+          if [[ "$POINTER_OK" == "true" ]]; then
+            echo "download_url=$LATEST_URL" >> "$GITHUB_OUTPUT"
+          else
+            echo "download_url=$VERSIONED_URL" >> "$GITHUB_OUTPUT"
+          fi
           echo "latest_url=$LATEST_URL" >> "$GITHUB_OUTPUT"
           echo "versioned_url=$VERSIONED_URL" >> "$GITHUB_OUTPUT"
           {
             echo "## Public APK download"
-            echo "- Latest (${ENV_TAG}): $LATEST_URL"
             echo "- This build: $VERSIONED_URL"
+            if [[ "$POINTER_OK" == "true" ]]; then
+              echo "- Latest (${ENV_TAG}): $LATEST_URL"
+            else
+              echo "- Latest (${ENV_TAG}): unavailable — the mirror has immutable releases enabled, so \`$LATEST_TAG\` cannot be republished."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Artifacts only ever accumulate on the mirror now, so the retention sweep
@@ -465,7 +483,7 @@ jobs:
             echo "- Version bump: \`${{ steps.meta.outputs.bump }}\`"
             echo "- Commit: \`${{ github.sha }}\`"
             if [[ "${{ steps.mirror_check.outputs.available }}" == "true" ]]; then
-              echo "- Download: ${{ steps.mirror_upload.outputs.latest_url }}"
+              echo "- Download: ${{ steps.mirror_upload.outputs.download_url }}"
             else
               echo "- Download: mirror not configured — no artifact published."
             fi

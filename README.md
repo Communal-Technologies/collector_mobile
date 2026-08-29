@@ -101,10 +101,18 @@ Commits since the last `v*` tag, and the APK published to a **public mirror repo
 collector can install from a plain link with no GitHub login. Tags on the mirror are
 prefixed `collector-` so this app and the member app can share one.
 
+Every run publishes two assets to its own versioned tag — `…-<version>-<build>.apk`
+for the audit trail and a stable-named `communal-collector-<env>.apk` beside it:
+
 ```
-https://github.com/<mirror>/releases/download/collector-staging-latest/communal-collector-staging.apk
-https://github.com/<mirror>/releases/download/collector-prod-latest/communal-collector-prod.apk
+https://github.com/<mirror>/releases/download/collector-staging-v<version>-<build>/communal-collector-staging.apk
 ```
+
+The run summary prints that URL. There is also a moving `collector-<env>-latest`
+pointer, but it only works while the mirror has GitHub's **immutable releases**
+setting off: the pointer is republished by deleting and recreating one tag, and
+immutability reserves a tag name permanently, so with it on the pointer survives
+exactly one build and the workflow then warns on every run instead of failing.
 
 Configure per **environment** (`staging`, `production`):
 
