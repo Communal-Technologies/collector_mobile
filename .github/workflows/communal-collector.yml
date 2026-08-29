@@ -1,0 +1,765 @@
+# Builds Communal Collector.
+#
+# - dev  → staging    → signed APK on the public mirror, plus an unsigned iOS
+#                       simulator build as a workflow artifact.
+# - main → production → signed APK on the public mirror, the AAB as a workflow
+#                       artifact, a Play Store upload and a TestFlight upload
+#                       when those creds exist, and a `v<semver>` tag + pubspec
+#                       bump committed back here.
+#
+# Same shape as the member app's `communal-mobile.yml`, with three deliberate
+# differences:
+#
+#   1. Mirror tags are namespaced `collector-<env>-…`. The member app publishes
+#      `staging-latest` / `prod-latest` to the same mirror, and an un-namespaced
+#      tag here would fight it for the pointer and hand testers the wrong app.
+#   2. No TLS cert-pin check: this app pins nothing (its dio client uses the
+#      platform trust store), so there is no pin set to go stale.
+#   3. No aps-environment gate on the iOS profile: the collector app has no push
+#      notifications, so a profile without the entitlement is correct here.
+#
+# THIS REPO STORES NO BINARIES. Every artifact is published to the public mirror
+# named by the PUBLIC_RELEASES_REPO variable, so the download link needs no login.
+#
+# Versioning is derived, not hand-maintained. The next version is computed from
+# the Conventional Commits since the last `v*` tag (feat → minor, `!`/BREAKING
+# CHANGE → major, anything else → patch) and committed back to pubspec.yaml on
+# production runs. pubspec is the floor, so a manual bump is still honoured.
+# versionCode comes from github.run_number, which Play requires to be monotonic.
+#
+# Public download URLs (the `collector-<env>-latest` tag is repointed every run):
+#   https://github.com/<mirror>/releases/download/collector-staging-latest/communal-collector-staging.apk
+#   https://github.com/<mirror>/releases/download/collector-prod-latest/communal-collector-prod.apk
+#
+# Keeps the 5 most recent mirror releases per environment; older ones are deleted.
+#
+# The ANDROID_KEYSTORE_* secrets are REPOSITORY-level on purpose: staging and
+# production are signed with one upload key. Do not add environment-scoped copies
+# — an environment secret shadows the repository one, and a staging build signed
+# with a different key can never be upgraded in place on a tester's phone.
+
+name: Communal Collector
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "lib/**"
+      - "android/**"
+      - "ios/**"
+      - "test/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "tool/**"
+      - ".github/workflows/communal-collector.yml"
+
+concurrency:
+  group: communal-collector-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  # The toolchain the app was written and verified against. Pinned, not floating
+  # on stable: an upstream Flutter release can break a release build with no
+  # commit of ours — 3.47.0 raised the minimum Gradle to 8.14. Bump deliberately,
+  # together with the Gradle wrapper, and together with the member app so the
+  # fleet is never stamped from two toolchains.
+  FLUTTER_VERSION: "3.41.6"
+
+jobs:
+  # The gate for both build jobs. macOS minutes cost 10x, so a failing analyze or
+  # a failing test should not reach the iOS runner at all.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # The build needs a defines file present to compile; the values are
+      # irrelevant to analyze and to the tests, which never resolve baseUrl.
+      - name: Seed tool/dart_defines.json
+        run: cp tool/dart_defines.example.json tool/dart_defines.json
+
+      - name: Analyze
+        run: flutter analyze
+
+      # These tests are what stands between a collector and a receipt written
+      # against the wrong account: one of them asserts the request body never
+      # names a cash repository.
+      - name: Test
+        run: flutter test
+
+  android:
+    runs-on: ubuntu-latest
+    needs: checks
+    # Pick the right secret bucket based on the branch.
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+    env:
+      IS_PROD: ${{ github.ref_name == 'main' }}
+
+    steps:
+      - name: Checkout
+        # Full history + tags so the version bump can find the last release tag
+        # and read the commit subjects since it.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Derives the next semver from the Conventional Commits since the last
+      # `v*` tag. `pubspec.yaml` holds the last released version and is the
+      # floor; the bump is committed back on production releases so the file
+      # and the tags never drift.
+      - name: Resolve next version
+        id: meta
+        run: |
+          set -euo pipefail
+          LINE=$(grep '^version:' pubspec.yaml)
+          CURRENT=$(echo "$LINE" | sed -E 's/^version:[[:space:]]*//' | cut -d+ -f1)
+          if ! echo "$CURRENT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::pubspec version '$CURRENT' is not in MAJOR.MINOR.PATCH form" >&2
+            exit 1
+          fi
+
+          LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [[ -n "$LAST_TAG" ]]; then
+            RANGE="${LAST_TAG}..HEAD"
+            BASE=$(echo "$LAST_TAG" | sed 's/^v//')
+          else
+            RANGE="HEAD"
+            BASE="$CURRENT"
+          fi
+
+          # Never regress: if pubspec was bumped by hand past the last tag, that wins.
+          BASE=$(printf '%s\n%s\n' "$BASE" "$CURRENT" | sort -V | tail -n1)
+
+          SUBJECTS=$(git log --format='%s%n%b' "$RANGE" 2>/dev/null || echo "")
+          BUMP=patch
+          if echo "$SUBJECTS" | grep -Eq '^[a-zA-Z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE:'; then
+            BUMP=major
+          elif echo "$SUBJECTS" | grep -Eq '^feat(\([^)]*\))?:'; then
+            BUMP=minor
+          fi
+
+          IFS='.' read -r MA MI PA <<< "$BASE"
+          case "$BUMP" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          NEXT="${MA}.${MI}.${PA}"
+          echo "Last tag: ${LAST_TAG:-none} | base: $BASE | bump: $BUMP | next: $NEXT"
+
+          if [[ "${{ env.IS_PROD }}" == "true" ]]; then
+            ENV_TAG="prod"
+          else
+            ENV_TAG="staging"
+          fi
+          echo "version_name=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "env_tag=$ENV_TAG" >> "$GITHUB_OUTPUT"
+          echo "file_tag=${NEXT}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${NEXT}" >> "$GITHUB_OUTPUT"
+
+      # pubspec is rewritten in the workspace so the built artifact carries the
+      # resolved version even on staging, where nothing is committed back.
+      - name: Apply resolved version to pubspec
+        run: |
+          set -euo pipefail
+          sed -i -E "s/^version:.*/version: ${{ steps.meta.outputs.version_name }}/" pubspec.yaml
+          grep '^version:' pubspec.yaml
+
+      - name: Generate tool/dart_defines.json
+        run: |
+          set -euo pipefail
+          # An unset APP_ENV resolves to `development` in config.dart, whose
+          # baseUrl getter throws on an empty BASE_URL — the app dies on its
+          # first request. Never ship that as a release; fail the build instead.
+          if [[ -z "${{ vars.APP_ENV }}" ]]; then
+            echo "::error::APP_ENV is not set for the '${{ github.ref_name == 'main' && 'production' || 'staging' }}' environment. The build would point at no API and fail on sign-in." >&2
+            exit 1
+          fi
+          mkdir -p tool
+          cat > tool/dart_defines.json <<EOF
+          {
+            "APP_ENV": "${{ vars.APP_ENV }}",
+            "BASE_URL": "${{ vars.BASE_URL }}"
+          }
+          EOF
+
+      - name: Decode keystore & write key.properties
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_B64" ]]; then
+            # A debug-signed artifact is rejected by Play and can never be
+            # upgraded to a properly signed build, so production must not
+            # silently fall through to it.
+            if [[ "${{ env.IS_PROD }}" == "true" ]]; then
+              echo "::error::ANDROID_KEYSTORE_BASE64 is not set for the production environment. Refusing to publish a debug-signed release." >&2
+              exit 1
+            fi
+            echo "ANDROID_KEYSTORE_BASE64 not set — release will fall back to debug signing."
+            exit 0
+          fi
+          # printf '%s' avoids the trailing newline that `echo` appends, which
+          # combined with the heredoc rendering can corrupt the decoded binary.
+          # Reading the secret from an env var also avoids workflow-template
+          # interpolation quirks on multi-line values.
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/upload.jks
+          cat > android/key.properties <<EOF
+          storeFile=app/upload.jks
+          storePassword=${KEYSTORE_PW}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PW}
+          EOF
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: |
+          flutter build apk --release \
+            --dart-define-from-file=tool/dart_defines.json \
+            --build-name="${{ steps.meta.outputs.version_name }}" \
+            --build-number="${{ steps.meta.outputs.build_number }}"
+
+      - name: Build release AAB (production only)
+        if: env.IS_PROD == 'true'
+        run: |
+          flutter build appbundle --release \
+            --dart-define-from-file=tool/dart_defines.json \
+            --build-name="${{ steps.meta.outputs.version_name }}" \
+            --build-number="${{ steps.meta.outputs.build_number }}"
+
+      # A release that fell back to debug signing is fine to hand a tester on
+      # staging, but it must be labelled: the two cannot be installed over each
+      # other, and finding that out on the phone costs a support round trip.
+      - name: Report the signing key
+        run: |
+          set -euo pipefail
+          if [[ -f android/key.properties ]]; then
+            echo "signed with the upload key" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::This build is DEBUG-SIGNED. It cannot be installed over an upload-key build, and Play will reject it."
+          fi
+
+      - name: Stage artifacts
+        id: stage
+        run: |
+          set -euo pipefail
+          # Versioned APK — immutable audit trail.
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "communal-collector-${{ steps.meta.outputs.env_tag }}-${{ steps.meta.outputs.file_tag }}.apk"
+          # Stable env-aware APK — overwritten each run, used as the public
+          # "latest" download. Copied to its final name on disk so we don't
+          # need gh's `file#display-name` rename syntax (which proved flaky).
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "communal-collector-${{ steps.meta.outputs.env_tag }}.apk"
+          if [[ "${{ env.IS_PROD }}" == "true" ]]; then
+            cp build/app/outputs/bundle/release/app-release.aab \
+              "communal-collector-${{ steps.meta.outputs.file_tag }}.aab"
+            cp build/app/outputs/bundle/release/app-release.aab communal-collector.aab
+          fi
+
+      # The AAB goes to a workflow artifact, not the public mirror: an AAB is
+      # not installable, only Play consumes it, and the mirror exists to hand
+      # testers a plain APK link. Needed as a download because Play's API
+      # refuses to create a release until one artifact has been uploaded to the
+      # console by hand, so the first release has to be fetched from here.
+      - name: Upload AAB (production only)
+        if: env.IS_PROD == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-android-aab-${{ steps.meta.outputs.file_tag }}
+          path: communal-collector-${{ steps.meta.outputs.file_tag }}.aab
+          retention-days: 90
+          if-no-files-found: error
+
+      # Mirror the APK to a separate PUBLIC GitHub repo so non-collaborators
+      # can install via a plain HTTPS link. Gated on the mirror secrets being
+      # configured — if not, the step is skipped and the release-notes section
+      # is omitted.
+      - name: Check public mirror credentials
+        id: mirror_check
+        run: |
+          if [[ -n "${{ secrets.PUBLIC_RELEASES_PAT }}" && -n "${{ vars.PUBLIC_RELEASES_REPO }}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Public mirror upload skipped — set PUBLIC_RELEASES_PAT (secret) and PUBLIC_RELEASES_REPO (var) to publish a public download URL."
+          fi
+
+      - name: Push APK to public mirror repo
+        if: steps.mirror_check.outputs.available == 'true'
+        id: mirror_upload
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASES_PAT }}
+        run: |
+          set -euo pipefail
+          REPO="${{ vars.PUBLIC_RELEASES_REPO }}"
+          ENV_TAG="${{ steps.meta.outputs.env_tag }}"
+          VERSION="${{ steps.meta.outputs.version_name }}"
+          BUILD="${{ steps.meta.outputs.build_number }}"
+          # `collector-` prefixed so this app and the member app can share one
+          # mirror without overwriting each other's latest pointer.
+          BUILD_TAG="collector-${ENV_TAG}-v${VERSION}-${BUILD}"
+          LATEST_TAG="collector-${ENV_TAG}-latest"
+          VERSIONED_NAME="communal-collector-${ENV_TAG}-${{ steps.meta.outputs.file_tag }}.apk"
+          STABLE_NAME="communal-collector-${ENV_TAG}.apk"
+
+          # GitHub always attaches auto-generated source zip/tarballs to a release
+          # and offers no way to suppress them. They are harmless here: the mirror
+          # holds no app source, so they contain only its README/.vscode files.
+          gh release create "$BUILD_TAG" \
+            --repo "$REPO" \
+            --title "Communal Collector ${VERSION} (build ${BUILD}) — ${ENV_TAG}" \
+            --notes "Source: \`${{ github.repository }}@${{ github.sha }}\`" \
+            "$VERSIONED_NAME" "$STABLE_NAME"
+
+          # Latest pointer — overwritten each run. Delete first if exists, then
+          # recreate so the asset list (and therefore the stable URL) refreshes.
+          #
+          # A repo with GitHub's "immutable releases" setting enabled burns the
+          # tag permanently, so the recreate fails with HTTP 422. Warn and keep
+          # going rather than failing the build: the versioned release above
+          # already carries the stable-named asset.
+          if gh release view "$LATEST_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release delete "$LATEST_TAG" --repo "$REPO" --yes --cleanup-tag || true
+          fi
+          if ! gh release create "$LATEST_TAG" \
+            --repo "$REPO" \
+            --title "Latest ${ENV_TAG} collector build" \
+            --notes "Always points at the most recent ${ENV_TAG} collector build. Direct link: https://github.com/${REPO}/releases/download/${LATEST_TAG}/${STABLE_NAME}" \
+            "$STABLE_NAME"; then
+            echo "::warning::Could not refresh the ${LATEST_TAG} pointer — this happens when '${REPO}' has immutable releases enabled. Turn that setting off to restore the ${LATEST_TAG} download link."
+          fi
+
+          LATEST_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/${STABLE_NAME}"
+          VERSIONED_URL="https://github.com/${REPO}/releases/download/${BUILD_TAG}/${VERSIONED_NAME}"
+          echo "latest_url=$LATEST_URL" >> "$GITHUB_OUTPUT"
+          echo "versioned_url=$VERSIONED_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Public APK download"
+            echo "- Latest (${ENV_TAG}): $LATEST_URL"
+            echo "- This build: $VERSIONED_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Artifacts only ever accumulate on the mirror now, so the retention sweep
+      # belongs here rather than on the source repo. Scoped to the collector
+      # prefix so it never prunes the member app's releases.
+      - name: Prune old mirror releases (keep last 5 per env)
+        if: steps.mirror_check.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASES_PAT }}
+        run: |
+          set -euo pipefail
+          REPO="${{ vars.PUBLIC_RELEASES_REPO }}"
+          PREFIX="collector-${{ steps.meta.outputs.env_tag }}-v"
+          mapfile -t TO_DELETE < <(gh api "repos/$REPO/releases" --paginate -q "
+            [.[] | select(.draft == false) | select(.tag_name | startswith(\"$PREFIX\"))]
+            | sort_by(.published_at) | reverse | .[5:] | .[].tag_name
+          ")
+          for tag in "${TO_DELETE[@]}"; do
+            if [[ -n "$tag" ]]; then
+              echo "Removing old mirror release: $tag"
+              gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag
+            fi
+          done
+
+      - name: Check Play Store credentials
+        id: play_check
+        if: env.IS_PROD == 'true'
+        # The secrets arrive via env, never interpolated into the script body:
+        # the service-account JSON is multi-line, and templating it inline
+        # expands to a dozen raw lines inside the `[[ ]]`, which is a bash
+        # syntax error. Same reason the keystore step reads its base64 from env.
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+          PLAY_PACKAGE: ${{ secrets.PLAY_STORE_PACKAGE_NAME }}
+        run: |
+          if [[ -n "$PLAY_JSON" && -n "$PLAY_PACKAGE" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Play Store secrets not set — skipping Play upload. Add PLAY_STORE_SERVICE_ACCOUNT_JSON and PLAY_STORE_PACKAGE_NAME (com.communalhq.communal_collector) to enable."
+          fi
+
+      - name: Upload to Google Play
+        if: env.IS_PROD == 'true' && steps.play_check.outputs.available == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ secrets.PLAY_STORE_PACKAGE_NAME }}
+          releaseFiles: communal-collector.aab
+          track: ${{ vars.PLAY_STORE_TRACK || 'internal' }}
+          status: ${{ vars.PLAY_STORE_RELEASE_STATUS || 'draft' }}
+
+      # This repo holds source, not binaries — every artifact lives on the public
+      # mirror. Production still records the released version here as a commit +
+      # `v<semver>` tag, which is what the next run's bump reads.
+      - name: Record the released version
+        if: env.IS_PROD == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version_name }}"
+          TAG="${{ steps.meta.outputs.release_tag }}"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
+             || git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists. The bump resolved to a version that has shipped." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pubspec.yaml
+          if git diff --cached --quiet; then
+            echo "pubspec already at $VERSION — tagging only."
+          else
+            git commit -m "Release v${VERSION} (build ${{ steps.meta.outputs.build_number }}) [skip ci]"
+          fi
+          git tag -a "$TAG" -m "Communal Collector ${VERSION} (build ${{ steps.meta.outputs.build_number }})"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "$TAG"
+
+      - name: Build summary
+        run: |
+          {
+            echo "## Communal Collector ${{ steps.meta.outputs.version_name }} (build ${{ steps.meta.outputs.build_number }})"
+            echo ""
+            echo "- Environment: \`${{ steps.meta.outputs.env_tag }}\`"
+            echo "- Version bump: \`${{ steps.meta.outputs.bump }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+            if [[ "${{ steps.mirror_check.outputs.available }}" == "true" ]]; then
+              echo "- Download: ${{ steps.mirror_upload.outputs.latest_url }}"
+            else
+              echo "- Download: mirror not configured — no artifact published."
+            fi
+            if [[ "${{ env.IS_PROD }}" == "true" ]]; then
+              if [[ "${{ steps.play_check.outputs.available }}" == "true" ]]; then
+                echo "- Play Store: uploaded to \`${{ vars.PLAY_STORE_TRACK || 'internal' }}\`."
+              else
+                echo "- Play Store: skipped (credentials not configured)."
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    # Runs on both branches. macOS minutes cost 10x, but an unsigned staging
+    # build is the only iOS feedback available without a Mac, and a Flutter/pod
+    # break that only surfaces on iOS is otherwise invisible until release day.
+    runs-on: macos-latest
+    needs: checks
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+    env:
+      IS_PROD: ${{ github.ref_name == 'main' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Mirrors the android job's resolver so both platforms stamp the same
+      # version. Nothing is committed or tagged here — the android job owns that.
+      - name: Resolve next version
+        id: meta
+        run: |
+          set -euo pipefail
+          LINE=$(grep '^version:' pubspec.yaml)
+          CURRENT=$(echo "$LINE" | sed -E 's/^version:[[:space:]]*//' | cut -d+ -f1)
+          if ! echo "$CURRENT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::pubspec version '$CURRENT' is not in MAJOR.MINOR.PATCH form" >&2
+            exit 1
+          fi
+
+          LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [[ -n "$LAST_TAG" ]]; then
+            RANGE="${LAST_TAG}..HEAD"
+            BASE=$(echo "$LAST_TAG" | sed 's/^v//')
+          else
+            RANGE="HEAD"
+            BASE="$CURRENT"
+          fi
+          BASE=$(printf '%s\n%s\n' "$BASE" "$CURRENT" | sort -V | tail -n1)
+
+          SUBJECTS=$(git log --format='%s%n%b' "$RANGE" 2>/dev/null || echo "")
+          BUMP=patch
+          if echo "$SUBJECTS" | grep -Eq '^[a-zA-Z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE:'; then
+            BUMP=major
+          elif echo "$SUBJECTS" | grep -Eq '^feat(\([^)]*\))?:'; then
+            BUMP=minor
+          fi
+
+          IFS='.' read -r MA MI PA <<< "$BASE"
+          case "$BUMP" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          echo "version_name=${MA}.${MI}.${PA}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "file_tag=${MA}.${MI}.${PA}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate tool/dart_defines.json
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ vars.APP_ENV }}" ]]; then
+            echo "::error::APP_ENV is not set for the '${{ github.ref_name == 'main' && 'production' || 'staging' }}' environment. The build would point at no API and fail on sign-in." >&2
+            exit 1
+          fi
+          mkdir -p tool
+          cat > tool/dart_defines.json <<EOF
+          {
+            "APP_ENV": "${{ vars.APP_ENV }}",
+            "BASE_URL": "${{ vars.BASE_URL }}"
+          }
+          EOF
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # `flutter build ios` generates ios/Podfile (this repo does not track one)
+      # and runs pod install itself. Calling pod install first fails on a
+      # Podfile-less checkout — CocoaPods resolves `Flutter` against the CDN
+      # instead of the local generated podspec and reports that every candidate
+      # "required a higher minimum deployment target".
+      - name: Prepare iOS Pods
+        run: flutter precache --ios
+
+      # Staging: compile unsigned to prove the iOS build is not broken, then also
+      # build a simulator .app. Installing on a physical device needs a signing
+      # identity we do not have; a simulator build needs none and can be run from
+      # any Mac (or a cloud Mac) with `xcrun simctl install booted <app>`, which
+      # is the only iOS smoke test available without a Mac of your own.
+      - name: Verify iOS build (staging)
+        if: env.IS_PROD == 'false'
+        run: |
+          set -euo pipefail
+          flutter build ios --release --no-codesign \
+            --dart-define-from-file=tool/dart_defines.json \
+            --build-name="${{ steps.meta.outputs.version_name }}" \
+            --build-number="${{ steps.meta.outputs.build_number }}"
+
+      - name: Build iOS simulator app (staging)
+        if: env.IS_PROD == 'false'
+        run: |
+          set -euo pipefail
+          flutter build ios --debug --simulator \
+            --dart-define-from-file=tool/dart_defines.json \
+            --build-name="${{ steps.meta.outputs.version_name }}" \
+            --build-number="${{ steps.meta.outputs.build_number }}"
+          cd build/ios/iphonesimulator
+          zip -qry "$GITHUB_WORKSPACE/communal-collector-staging-sim-${{ steps.meta.outputs.file_tag }}.zip" Runner.app
+
+      - name: Upload iOS simulator build
+        if: env.IS_PROD == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-ios-simulator-staging-${{ steps.meta.outputs.file_tag }}
+          path: communal-collector-staging-sim-${{ steps.meta.outputs.file_tag }}.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      # Production-only: full archive + sign + TestFlight upload, gated on creds.
+      - name: Check iOS signing credentials
+        if: env.IS_PROD == 'true'
+        id: ios_check
+        # Read through env, not inline interpolation: a base64 secret pasted
+        # without `-w0` is multi-line, and expanding it inside `[[ ]]` is a
+        # bash syntax error rather than an empty-string test.
+        env:
+          IOS_CERT_BASE64: ${{ secrets.IOS_CERT_BASE64 }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          [[ -z "$IOS_CERT_BASE64" ]] && MISSING+=("IOS_CERT_BASE64")
+          [[ -z "$IOS_CERT_PASSWORD" ]] && MISSING+=("IOS_CERT_PASSWORD")
+          [[ -z "$IOS_PROVISIONING_PROFILE_BASE64" ]] && MISSING+=("IOS_PROVISIONING_PROFILE_BASE64")
+          [[ -z "$IOS_BUNDLE_ID" ]] && MISSING+=("IOS_BUNDLE_ID (var)")
+          [[ -z "$IOS_TEAM_ID" ]] && MISSING+=("IOS_TEAM_ID (var)")
+          if (( ${#MISSING[@]} > 0 )); then
+            echo "::warning::iOS signing skipped — missing: ${MISSING[*]}"
+            echo "signing_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "signing_available=true" >> "$GITHUB_OUTPUT"
+          fi
+          MISSING_ASC=()
+          [[ -z "$ASC_KEY_ID" ]] && MISSING_ASC+=("APP_STORE_CONNECT_API_KEY_ID")
+          [[ -z "$ASC_ISSUER_ID" ]] && MISSING_ASC+=("APP_STORE_CONNECT_API_ISSUER_ID")
+          [[ -z "$ASC_KEY_BASE64" ]] && MISSING_ASC+=("APP_STORE_CONNECT_API_KEY_BASE64")
+          if (( ${#MISSING_ASC[@]} > 0 )); then
+            echo "::warning::TestFlight upload will be skipped — missing: ${MISSING_ASC[*]}"
+            echo "upload_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload_available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Smoke build (no-codesign) when prod creds missing
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'false'
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define-from-file=tool/dart_defines.json \
+            --build-name="${{ steps.meta.outputs.version_name }}" \
+            --build-number="${{ steps.meta.outputs.build_number }}"
+
+      - name: Import code-signing certificate
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.IOS_CERT_BASE64 }}
+          p12-password: ${{ secrets.IOS_CERT_PASSWORD }}
+
+      - name: Install provisioning profile
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        id: profile
+        run: |
+          set -euo pipefail
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES_DIR"
+          PROFILE_PATH="$PROFILES_DIR/communal-collector.mobileprovision"
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}" | base64 -d > "$PROFILE_PATH"
+          # Extract the human-readable Name field; ExportOptions.plist needs it.
+          PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" \
+            | /usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin)
+          echo "profile_name=$PROFILE_NAME" >> "$GITHUB_OUTPUT"
+
+          # The profile has to be for this app, not the member app's App ID: both
+          # live in one Apple team, and a mismatched profile fails deep inside
+          # codesign with an entitlement error that names neither app.
+          PROFILE_APP_ID=$(security cms -D -i "$PROFILE_PATH" \
+            | /usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /dev/stdin 2>/dev/null || true)
+          if [[ "$PROFILE_APP_ID" != *".${{ vars.IOS_BUNDLE_ID }}" ]]; then
+            echo "::error::The provisioning profile is for '${PROFILE_APP_ID:-unknown}', not '${{ vars.IOS_BUNDLE_ID }}'. Upload the collector app's App Store distribution profile to IOS_PROVISIONING_PROFILE_BASE64."
+            exit 1
+          fi
+
+      # The archive has to be signed for distribution, not only the export.
+      # project.pbxproj pins CODE_SIGN_IDENTITY to "iPhone Developer" at the
+      # project level, so xcodebuild would hunt for a development identity that is
+      # not in this keychain and fail before ExportOptions.plist is ever read. The
+      # Runner target's Release xcconfig is the level that overrides it.
+      - name: Pin manual distribution signing for the archive
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        # Through env for the same reason the credential check is: these are
+        # expanded inside a heredoc, and a value carrying a quote or a $ would be
+        # interpreted by the shell rather than written to the file.
+        env:
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          PROFILE_NAME: ${{ steps.profile.outputs.profile_name }}
+        run: |
+          set -euo pipefail
+          # Read the identity out of the keychain instead of hardcoding a name: a
+          # certificate issued now is "Apple Distribution", an older one is
+          # "iPhone Distribution", and codesign matches on the full common name.
+          IDENTITY=$(security find-identity -v -p codesigning \
+            | sed -nE 's/.*"((Apple|iPhone) Distribution:[^"]*)".*/\1/p' | head -1)
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::No distribution identity in the keychain — IOS_CERT_BASE64 is most likely a development certificate."
+            security find-identity -v -p codesigning || true
+            exit 1
+          fi
+          echo "Signing as: $IDENTITY"
+          cat > ios/Flutter/Signing.xcconfig <<EOF
+          CODE_SIGN_STYLE = Manual
+          CODE_SIGN_IDENTITY = $IDENTITY
+          CODE_SIGN_IDENTITY[sdk=iphoneos*] = $IDENTITY
+          DEVELOPMENT_TEAM = $TEAM_ID
+          PROVISIONING_PROFILE_SPECIFIER = $PROFILE_NAME
+          EOF
+
+      - name: Generate ExportOptions.plist
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        env:
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+          PROFILE_NAME: ${{ steps.profile.outputs.profile_name }}
+        run: |
+          cat > ios/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>$TEAM_ID</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key>
+              <string>$PROFILE_NAME</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Build IPA
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        run: |
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist \
+            --dart-define-from-file=tool/dart_defines.json \
+            --build-name="${{ steps.meta.outputs.version_name }}" \
+            --build-number="${{ steps.meta.outputs.build_number }}"
+
+      - name: Upload to TestFlight
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && steps.ios_check.outputs.upload_available == 'true'
+        uses: apple-actions/upload-testflight-build@v1
+        with:
+          app-path: build/ios/ipa/Runner.ipa
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          issuer-id: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}

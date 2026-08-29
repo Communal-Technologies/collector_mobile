@@ -90,3 +90,49 @@ figure exists.
 flutter analyze
 flutter test
 ```
+
+Both run in CI as the gate on the build jobs.
+
+## Releases
+
+`.github/workflows/communal-collector.yml`, the same pipeline the member app uses:
+`dev` → staging, `main` → production, the version derived from the Conventional
+Commits since the last `v*` tag, and the APK published to a **public mirror repo** so a
+collector can install from a plain link with no GitHub login. Tags on the mirror are
+prefixed `collector-` so this app and the member app can share one.
+
+```
+https://github.com/<mirror>/releases/download/collector-staging-latest/communal-collector-staging.apk
+https://github.com/<mirror>/releases/download/collector-prod-latest/communal-collector-prod.apk
+```
+
+Configure per **environment** (`staging`, `production`):
+
+| Variable | Example | Without it |
+|---|---|---|
+| `APP_ENV` | `staging` / `production` | The build fails on purpose — an unset value compiles to `development`, which has no API origin |
+| `BASE_URL` | *(leave empty)* | Nothing; only read when `APP_ENV` is `development` |
+| `PUBLIC_RELEASES_REPO` | `communalhq/communal-releases` | No public download link; the APK is not published anywhere |
+| `PLAY_STORE_TRACK` | `internal` | Defaults to `internal` |
+| `PLAY_STORE_RELEASE_STATUS` | `draft` | Defaults to `draft` |
+| `IOS_BUNDLE_ID` | `com.communalhq.communalCollector` | iOS signing is skipped |
+| `IOS_TEAM_ID` | the Apple team id | iOS signing is skipped |
+
+Secrets — **repository level, not environment level**, for the Android four:
+
+| Secret | Without it |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | Staging falls back to debug signing; **production fails** |
+| `ANDROID_KEYSTORE_PASSWORD` | as above |
+| `ANDROID_KEY_ALIAS` | as above |
+| `ANDROID_KEY_PASSWORD` | as above |
+| `PUBLIC_RELEASES_PAT` | No public download link |
+| `PLAY_STORE_SERVICE_ACCOUNT_JSON` | Play upload skipped |
+| `PLAY_STORE_PACKAGE_NAME` (`com.communalhq.communal_collector`) | Play upload skipped |
+| `IOS_CERT_BASE64`, `IOS_CERT_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` | iOS builds unsigned only |
+| `APP_STORE_CONNECT_API_KEY_ID`, `…_ISSUER_ID`, `…_KEY_BASE64` | TestFlight upload skipped |
+
+**One** upload key signs both staging and production, held once at repository level (the
+member app is set up the same way). Adding an environment-scoped `ANDROID_*` copy
+silently shadows the repository one, and a staging build signed with a different key
+cannot be installed over a production one.
