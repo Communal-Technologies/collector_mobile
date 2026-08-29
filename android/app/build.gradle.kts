@@ -19,7 +19,7 @@ val keyProps = Properties().apply {
 }
 
 android {
-    namespace = "com.communalhq.communal_collector"
+    namespace = "com.communal.collector"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -33,7 +33,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.communalhq.communal_collector"
+        applicationId = "com.communal.collector"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

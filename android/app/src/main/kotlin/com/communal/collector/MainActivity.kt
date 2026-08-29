@@ -1,4 +1,4 @@
-package com.communalhq.communal_collector
+package com.communal.collector
 
 import io.flutter.embedding.android.FlutterActivity
 

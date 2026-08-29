@@ -433,7 +433,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Play Store secrets not set — skipping Play upload. Add PLAY_STORE_SERVICE_ACCOUNT_JSON and PLAY_STORE_PACKAGE_NAME (com.communalhq.communal_collector) to enable."
+            echo "::warning::Play Store secrets not set — skipping Play upload. Add PLAY_STORE_SERVICE_ACCOUNT_JSON and PLAY_STORE_PACKAGE_NAME (com.communal.collector) to enable."
           fi
 
       - name: Upload to Google Play

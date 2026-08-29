@@ -77,9 +77,20 @@ flutter run --dart-define-from-file=tool/dart_defines.json
 ```
 
 `BASE_URL` is only read when `APP_ENV` is `development`; staging and production
-origins are compiled in. It must be reachable **from the handset**, so it is the dev
-machine's LAN address and port `8989` (the local gateway) rather than `127.0.0.1` —
-that address moves around, which is exactly why it is a define.
+origins are compiled in. It must be reachable **from the handset**, and the dev
+machine's LAN address moves around — which is why it is a define, and why the
+setting that does not move is `http://127.0.0.1:8989` bridged over the cable:
+
+```bash
+adb reverse tcp:8989 tcp:8989   # handset's 127.0.0.1:8989 -> this machine's gateway
+```
+
+Re-run it after every `adb` reconnect; it is not persisted on the device.
+
+Build the APK the same way. A `flutter build apk` with no `--dart-define-from-file`
+compiles `APP_ENV=development` with an empty `BASE_URL`, which leaves the app with no
+API origin at all: it opens on "Cannot reach the cooperative" and never reaches
+sign-in.
 
 ## Backends
 
@@ -153,7 +164,7 @@ Secrets — **repository level, not environment level**, for the Android four:
 | `ANDROID_KEY_PASSWORD` | as above |
 | `PUBLIC_RELEASES_PAT` | No public download link |
 | `PLAY_STORE_SERVICE_ACCOUNT_JSON` | Play upload skipped |
-| `PLAY_STORE_PACKAGE_NAME` (`com.communalhq.communal_collector`) | Play upload skipped |
+| `PLAY_STORE_PACKAGE_NAME` (`com.communal.collector`) | Play upload skipped |
 | `IOS_CERT_BASE64`, `IOS_CERT_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` | iOS builds unsigned only |
 | `APP_STORE_CONNECT_API_KEY_ID`, `…_ISSUER_ID`, `…_KEY_BASE64` | TestFlight upload skipped |
 
