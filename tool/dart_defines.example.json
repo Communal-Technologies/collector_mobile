@@ -1,0 +1,4 @@
+{
+  "APP_ENV": "development",
+  "BASE_URL": "http://192.168.0.10:8989"
+}
