@@ -6,8 +6,9 @@
 ///     flutter run --dart-define-from-file=tool/dart_defines.json
 ///
 /// The development URL has to be reachable *from the handset*, so it is the
-/// machine's LAN address rather than 127.0.0.1 — that address changes often, which
-/// is exactly why it is a define and not a constant.
+/// zrok share that fronts the local gateway — the same one the member app uses.
+/// Neither 127.0.0.1 (which needs an `adb reverse` tunnel that dies with every adb
+/// disconnect) nor this machine's LAN address (which roams) survives a day of use.
 class AppConfig {
   AppConfig._();
 
