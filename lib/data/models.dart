@@ -205,8 +205,11 @@ class MemberObligation {
     required this.accountName,
     required this.amount,
     required this.amountPaid,
+    required this.category,
+    required this.recurring,
     required this.frequency,
     required this.nextDueDate,
+    required this.fines,
   });
 
   final String id;
@@ -214,8 +217,19 @@ class MemberObligation {
   final String accountName;
   final int amount;
   final int amountPaid;
+
+  /// The cooperative's chart-of-accounts type: equity, patronage or custom.
+  final String category;
+
+  /// Whether the account falls due again. Equity does not — it is one commitment
+  /// paid in instalments until it is complete, so it has no cycle, no due date and
+  /// nothing to be overdue on. Only patronage and custom recur, on their frequency.
+  final bool recurring;
   final String frequency;
   final DateTime? nextDueDate;
+
+  /// The fines raised against this account's missed cycles.
+  final List<MemberFine> fines;
 
   /// The name where the cooperative gave one, the code where it did not. The code
   /// is machine-minted and means nothing to the member, so it is the last resort.
@@ -227,16 +241,184 @@ class MemberObligation {
   }
 
   factory MemberObligation.fromJson(Map<String, dynamic> json) {
+    final rawFines = (json['fines'] as List<dynamic>?) ?? const [];
     return MemberObligation(
       id: _asString(json['id']),
       accountCode: _asString(json['account_code']),
       accountName: _asString(json['account_name']),
       amount: _asInt(json['amount']),
       amountPaid: _asInt(json['amount_paid']),
+      category: _asString(json['category']),
+      // Absent on a server that predates the distinction, where every account was
+      // drawn as though it recurred. A due date is the honest signal there: the
+      // server only ever computed one for an account with a cycle.
+      recurring: json.containsKey('recurring')
+          ? json['recurring'] == true
+          : json['next_due_date'] != null,
       frequency: _asString(json['frequency']),
       nextDueDate: Dates.tryParse(json['next_due_date']),
+      fines: rawFines
+          .whereType<Map<String, dynamic>>()
+          .map(MemberFine.fromJson)
+          .toList(),
     );
   }
+}
+
+/// A penalty standing against the member — either against one account's missed
+/// cycle, or raised against them directly.
+class MemberFine {
+  const MemberFine({
+    required this.id,
+    required this.obligationId,
+    required this.amount,
+    required this.amountPaid,
+    required this.status,
+    required this.description,
+    required this.dueDate,
+  });
+
+  final String id;
+
+  /// The obligation whose missed cycle earned it, empty where an administrator
+  /// raised it against the member directly.
+  final String obligationId;
+  final int amount;
+  final int amountPaid;
+  final String status;
+  final String description;
+  final DateTime? dueDate;
+
+  int get outstanding {
+    final left = amount - amountPaid;
+    return left > 0 ? left : 0;
+  }
+
+  /// Whether a collector may take it. A waived fine is forgiven and a paid one is
+  /// settled; taking cash against either would be taking money the member no
+  /// longer owes.
+  bool get collectible => status == 'pending' && outstanding > 0;
+
+  factory MemberFine.fromJson(Map<String, dynamic> json) {
+    return MemberFine(
+      id: _asString(json['id']),
+      obligationId: _asString(json['obligation_id']),
+      amount: _asInt(json['amount']),
+      amountPaid: _asInt(json['amount_paid']),
+      status: _asString(json['status']),
+      description: _asString(json['description']),
+      dueDate: Dates.tryParse(json['due_date']),
+    );
+  }
+}
+
+/// One thing at the member's door that the cash can be put against.
+///
+/// An obligation account and a fine are the same decision to a collector — a name,
+/// a figure and an amount to write beside it — but they are different rows in
+/// different tables settled by different postings. So the screen works over this,
+/// and `key` is what the receipt is keyed on.
+class CollectionTarget {
+  const CollectionTarget({
+    required this.key,
+    required this.obligationCode,
+    required this.fineId,
+    required this.title,
+    required this.amount,
+    required this.amountPaid,
+    required this.recurring,
+    required this.nextDueDate,
+  });
+
+  /// Unique within one receipt: an account code, or the fine's id namespaced so a
+  /// fine and an account can never collide.
+  final String key;
+  final String obligationCode;
+  final String fineId;
+  final String title;
+
+  /// What the whole thing comes to: one cycle for a recurring account, the entire
+  /// commitment for a one-off, the penalty for a fine.
+  final int amount;
+  final int amountPaid;
+  final bool recurring;
+  final DateTime? nextDueDate;
+
+  bool get isFine => fineId.isNotEmpty;
+
+  int get outstanding {
+    final left = amount - amountPaid;
+    return left > 0 ? left : 0;
+  }
+
+  factory CollectionTarget.obligation(MemberObligation obligation) {
+    return CollectionTarget(
+      key: obligation.accountCode,
+      obligationCode: obligation.accountCode,
+      fineId: '',
+      title: obligation.title,
+      amount: obligation.amount,
+      amountPaid: obligation.amountPaid,
+      recurring: obligation.recurring,
+      nextDueDate: obligation.nextDueDate,
+    );
+  }
+
+  /// A fine reads as a penalty rather than an account: it is settled once, in full
+  /// or in part, and never falls due again — so it carries no frequency and its own
+  /// due date is only what it was raised against.
+  factory CollectionTarget.fine(MemberFine fine, {String against = ''}) {
+    final what = fine.description.isNotEmpty ? fine.description : 'late payment';
+    return CollectionTarget(
+      key: 'fine:${fine.id}',
+      obligationCode: '',
+      fineId: fine.id,
+      title: against.isEmpty ? 'Fine — $what' : 'Fine — $against',
+      amount: fine.amount,
+      amountPaid: fine.amountPaid,
+      recurring: false,
+      nextDueDate: fine.dueDate,
+    );
+  }
+
+  /// The obligation accounts with the fines that ride on them, and the fines that
+  /// stand on their own — each fine directly beneath what it was raised against, so
+  /// a collector reads the account and its penalty together.
+  static List<CollectionTarget> spread(
+    List<MemberObligation> obligations,
+    List<MemberFine> standaloneFines,
+  ) {
+    final targets = <CollectionTarget>[];
+    for (final obligation in obligations) {
+      targets.add(CollectionTarget.obligation(obligation));
+      for (final fine in obligation.fines) {
+        if (!fine.collectible) continue;
+        targets.add(CollectionTarget.fine(fine, against: obligation.title));
+      }
+    }
+    for (final fine in standaloneFines) {
+      if (!fine.collectible) continue;
+      targets.add(CollectionTarget.fine(fine));
+    }
+    return targets;
+  }
+}
+
+/// Everything at the member's door, and what could not be read.
+class MemberCollectibles {
+  const MemberCollectibles({
+    required this.targets,
+    this.stale = false,
+    this.finesError = '',
+  });
+
+  final List<CollectionTarget> targets;
+  final bool stale;
+
+  /// Why the fines raised against the member directly could not be read, where
+  /// they could not. Their contributions are still collectable without them, so
+  /// this is a notice on the screen rather than a failure of it.
+  final String finesError;
 }
 
 /// One thing a collection settles and how much of the cash goes there.
@@ -245,17 +427,24 @@ class CollectionAllocation {
     required this.obligationCode,
     required this.title,
     required this.amount,
+    this.fineId = '',
   });
 
   final String obligationCode;
   final String title;
   final int amount;
 
+  /// Set where the cash settles a fine rather than an obligation account.
+  final String fineId;
+
+  bool get isFine => fineId.isNotEmpty;
+
   factory CollectionAllocation.fromJson(Map<String, dynamic> json) {
     return CollectionAllocation(
       obligationCode: _asString(json['obligation'] ?? json['obligation_code']),
       title: _asString(json['account_name'] ?? json['title']),
       amount: _asInt(json['amount']),
+      fineId: _asString(json['fine_id']),
     );
   }
 
@@ -263,14 +452,23 @@ class CollectionAllocation {
         'obligation': obligationCode,
         'title': title,
         'amount': amount,
+        if (fineId.isNotEmpty) 'fine_id': fineId,
       };
 
-  /// The wire shape obligations-svc accepts. `title` is the app's own label and
-  /// has no place in the request.
-  Map<String, dynamic> toRequestJson() => {
-        'obligation': obligationCode,
-        'amount': amount,
-      };
+  /// The wire shape obligations-svc accepts. `title` is the app's own label and has
+  /// no place in the request. An obligation line carries no `target_type` at all:
+  /// the service reads its absence as an obligation, and a receipt queued by an
+  /// older build has to keep sending exactly what it always sent.
+  Map<String, dynamic> toRequestJson() => isFine
+      ? {
+          'target_type': 'fine',
+          'fine_id': fineId,
+          'amount': amount,
+        }
+      : {
+          'obligation': obligationCode,
+          'amount': amount,
+        };
 }
 
 /// A receipt. `pending` is a record waiting for an administrator to countersign the
