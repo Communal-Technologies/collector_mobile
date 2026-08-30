@@ -300,4 +300,80 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.textContaining('Record ₦'), findsOneWidget);
   });
+
+  testWidgets('a one-off commitment reads as progress, never as a due date',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpScreen(tester, [
+      _obligation('Dco-C-936038', 'Share Capital', 15500000, recurring: false),
+    ]);
+
+    expect(find.textContaining('of ₦155,000 paid'), findsOneWidget);
+    expect(find.textContaining('due'), findsNothing);
+    expect(find.textContaining('by '), findsNothing);
+
+    // The sheet says what is left to finish it and offers no standing charge: a
+    // one-off has no cycle for one to be the amount of.
+    await tester.tap(find.text('Share Capital'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('left to complete it'), findsOneWidget);
+    expect(find.textContaining('Pay the rest'), findsOneWidget);
+    expect(find.textContaining('Standing'), findsNothing);
+  });
+
+  testWidgets('the due lens is a recurring account\'s question alone',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    // Six rows so the lens bar is shown at all, and the only thing among them that
+    // can have fallen due is the fine — a one-off commitment never does.
+    await _pumpScreen(
+      tester,
+      [
+        for (var i = 0; i < 6; i++)
+          _obligation('E$i', 'Equity $i', 1000000, recurring: false),
+      ],
+      fines: [_fine('fine-2', 250000)],
+    );
+
+    await tester.tap(find.text('Due now'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Fine — late payment'), findsOneWidget);
+    expect(find.textContaining('Equity'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('more than is standing on a fine cannot be recorded',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpScreen(
+      tester,
+      [_obligation('Dco-C-180302', 'Thrift Savings', 25000000)],
+      fines: [_fine('fine-2', 250000)],
+    );
+
+    await tester.tap(find.textContaining('Fine — late payment'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '9000');
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('can only take'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Add ₦9,000.00'),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
 }
