@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import 'core/app_update.dart';
 import 'core/config.dart';
 import 'core/theme.dart';
 import 'data/api_client.dart';
@@ -202,7 +203,9 @@ class _EntryState extends State<_Entry> with WidgetsBindingObserver {
     if (status == SessionStatus.signedIn) {
       // The token says which account this is. The PIN is what says the phone is in
       // the right hands, and it is asked for on every launch.
-      return session.locked ? const LockScreen() : const HomeShell();
+      return session.locked
+          ? const LockScreen()
+          : const AppUpdateWatcher(child: HomeShell());
     }
     if (network.isOffline && !_loginShown) {
       return SplashScreen(
