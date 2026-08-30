@@ -157,20 +157,23 @@ class _LoginScreenState extends State<LoginScreen> {
                     'Signing in needs a connection — the code has to be sent to '
                     'you and checked.',
               ),
-              FilledButton(
-                onPressed: _busy || offline ? null : _submit,
-                child: _busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _busy || offline ? null : _submit,
+                  child: _busy
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          offline ? 'Waiting for a connection' : 'Send my code',
                         ),
-                      )
-                    : Text(
-                        offline ? 'Waiting for a connection' : 'Send my code',
-                      ),
+                ),
               ),
               const SizedBox(height: 6),
               // A forgotten PIN stops the collector at this screen — the code is only

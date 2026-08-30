@@ -283,18 +283,21 @@ class _VerifyScreenState extends State<VerifyScreen> {
                     'The code can only be checked by Communal, so this last step '
                     'needs a connection.',
               ),
-              FilledButton(
-                onPressed: _busy || offline ? null : _submit,
-                child: _busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(offline ? 'Waiting for a connection' : 'Sign in'),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _busy || offline ? null : _submit,
+                  child: _busy
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(offline ? 'Waiting for a connection' : 'Sign in'),
+                ),
               ),
             ],
           ),

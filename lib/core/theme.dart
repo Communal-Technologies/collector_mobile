@@ -126,7 +126,12 @@ ThemeData buildAppTheme() {
       style: FilledButton.styleFrom(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(52),
+        // A height, and a width only wide enough to be tappable. Not
+        // `Size.fromHeight`: that is a minimum width of infinity, which is a valid
+        // size in a column and an invalid one anywhere the width is unbounded — a
+        // row, a wrap, a horizontal list. A button that wants the full width says
+        // so where it is used.
+        minimumSize: const Size(64, 52),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
@@ -134,7 +139,7 @@ ThemeData buildAppTheme() {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.primary,
-        minimumSize: const Size.fromHeight(48),
+        minimumSize: const Size(64, 48),
         side: const BorderSide(color: AppColors.primary),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),

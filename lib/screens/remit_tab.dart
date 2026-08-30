@@ -262,26 +262,29 @@ class _RemitTabState extends State<RemitTab> {
                             'counted, so it cannot be queued on this phone like a '
                             'receipt can.',
                       ),
-                      FilledButton(
-                        onPressed: _submitting || typed <= 0 || offline
-                            ? null
-                            : () => _submit(data),
-                        child: _submitting
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _submitting || typed <= 0 || offline
+                              ? null
+                              : () => _submit(data),
+                          child: _submitting
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Text(
+                                  offline
+                                      ? 'Waiting for a connection'
+                                      : typed <= 0
+                                      ? 'Enter an amount'
+                                      : 'Declare ${Money.format(typed)}',
                                 ),
-                              )
-                            : Text(
-                                offline
-                                    ? 'Waiting for a connection'
-                                    : typed <= 0
-                                    ? 'Enter an amount'
-                                    : 'Declare ${Money.format(typed)}',
-                              ),
+                        ),
                       ),
                       const SizedBox(height: 8),
                       const Text(

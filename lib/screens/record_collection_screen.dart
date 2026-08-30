@@ -837,13 +837,16 @@ class _AmountSheetState extends State<_AmountSheet> {
             ],
           ),
           const SizedBox(height: 18),
-          FilledButton(
-            onPressed: entered <= 0 && widget.initial <= 0
-                ? null
-                : () => Navigator.of(context).pop(entered),
-            child: Text(entered <= 0
-                ? 'Leave this account'
-                : '${widget.initial > 0 ? 'Update' : 'Add'} ${Money.format(entered)}'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: entered <= 0 && widget.initial <= 0
+                  ? null
+                  : () => Navigator.of(context).pop(entered),
+              child: Text(entered <= 0
+                  ? 'Leave this account'
+                  : '${widget.initial > 0 ? 'Update' : 'Add'} ${Money.format(entered)}'),
+            ),
           ),
         ],
       ),
@@ -979,9 +982,12 @@ class _ReviewSheetState extends State<_ReviewSheet> {
               ),
             ),
             const SizedBox(height: 18),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Back to the accounts'),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Back to the accounts'),
+              ),
             ),
           ],
         ),

@@ -1,3 +1,4 @@
+import 'package:communal_collector/core/theme.dart';
 import 'package:communal_collector/data/api_client.dart';
 import 'package:communal_collector/data/local_cache.dart';
 import 'package:communal_collector/data/models.dart';
@@ -96,7 +97,11 @@ Future<void> _pumpScreen(
       value: repository,
       child: BlocProvider<OutboxCubit>(
         create: (_) => OutboxCubit(outbox: Outbox(), repository: repository),
+        // The app's own theme, not the default one: the button themes carry the
+        // sizes these screens are laid out against, and a bug that only exists
+        // under them is invisible to a test that leaves them out.
         child: MaterialApp(
+          theme: buildAppTheme(),
           home: RecordCollectionScreen(grant: _grant, member: _member),
         ),
       ),

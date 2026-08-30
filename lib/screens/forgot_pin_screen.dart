@@ -239,24 +239,27 @@ class _ForgotPinScreenState extends State<ForgotPinScreen> {
                 reason: 'The code has to be sent to you and checked, so this needs '
                     'a connection.',
               ),
-              FilledButton(
-                onPressed: _busy || offline
-                    ? null
-                    : (_sent ? _setPin : _sendCode),
-                child: _busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _busy || offline
+                      ? null
+                      : (_sent ? _setPin : _sendCode),
+                  child: _busy
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          offline
+                              ? 'Waiting for a connection'
+                              : (_sent ? 'Set my PIN' : 'Send my code'),
                         ),
-                      )
-                    : Text(
-                        offline
-                            ? 'Waiting for a connection'
-                            : (_sent ? 'Set my PIN' : 'Send my code'),
-                      ),
+                ),
               ),
               if (_sent) ...[
                 const SizedBox(height: 6),

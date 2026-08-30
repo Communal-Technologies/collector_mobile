@@ -364,9 +364,12 @@ class _PendingSheet extends StatelessWidget {
               icon: pending.rejected ? Iconsax.danger : Iconsax.cloud_cross,
             ),
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: onRetry,
-              child: Text(pending.rejected ? 'Send again' : 'Try now'),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onRetry,
+                child: Text(pending.rejected ? 'Send again' : 'Try now'),
+              ),
             ),
             if (onDiscard != null)
               Align(
