@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 12 took the launch window away from windowBackground and gave it to the
      platform splash screen, which centres the *launcher icon* on it — so without
-     these the collector opened on the stock Flutter logo. The purple and the mark are the
-     ones the Dart splash draws. No plate behind the mark: a plate is filled to the
-     launcher's icon mask, which is the device's shape to choose, not ours. -->
+     these the collector opened on the stock Flutter logo. Black ground and the white
+     mark: the member app declares none of this and gets the platform's black with its
+     purple mark, and the collector is the same icon in the other tint, so it matches
+     that rather than inventing a second treatment. No plate behind the mark: a plate
+     is filled to the launcher's icon mask, which is the device's shape to choose,
+     not ours. -->
 <resources>
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
-        <item name="android:windowSplashScreenBackground">@color/brand_purple</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_ground</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
     </style>
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">

@@ -3,9 +3,10 @@
      the brand purple, the way the member app's launch window carries its mark with no
      plate behind it. No plate also means no icon mask, and the mask was the only
      reason a shape appeared here that the Dart splash does not draw.
-     The transparent canvas is the padding. The platform keeps the middle 192 of a
-     288dp icon, and the mark is well inside that so it reads at the same weight as
-     the one in the Dart splash rather than filling the screen. -->
+     The transparent canvas is the padding. The platform crops to the middle 192 of
+     the 288dp canvas and scales that back up, so what lands on screen is half again
+     the dp declared here — 66dp measures the same as the member app's mark, which
+     declares nothing and takes the platform's own size. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
@@ -14,8 +15,8 @@
         </shape>
     </item>
     <item
-        android:width="104dp"
-        android:height="104dp"
+        android:width="66dp"
+        android:height="66dp"
         android:drawable="@drawable/brand_mark_white"
         android:gravity="center" />
 </layer-list>

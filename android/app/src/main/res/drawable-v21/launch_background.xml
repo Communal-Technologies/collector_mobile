@@ -3,5 +3,5 @@
      template points the launch theme here on API 21+, and the stock version deferred
      to ?android:colorBackground — which is white, or black in dark mode. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@color/brand_purple" />
+    <item android:drawable="@color/launch_ground" />
 </layer-list>

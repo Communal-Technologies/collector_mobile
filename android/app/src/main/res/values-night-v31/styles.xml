@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Identical to values-v31; see the note there. The splash is brand-locked the way
-     the member app's is — the Dart screen behind it is purple whatever the system
-     palette says, so a dark launch window would only flash a different colour on the
-     way in. -->
+<!-- Identical to values-v31; see the note there. The launch window does not follow
+     the system palette: it is the same black in either mode, because the app it opens
+     into does not change colour either. -->
 <resources>
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
-        <item name="android:windowSplashScreenBackground">@color/brand_purple</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_ground</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
     </style>
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
