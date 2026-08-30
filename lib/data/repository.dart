@@ -252,6 +252,52 @@ class CollectorRepository {
     }
   }
 
+  Future<Cached<MemberFine>> memberFines(
+    String cooperativeId,
+    String ledgerNumber,
+  ) async {
+    final key = 'fines:$cooperativeId:$ledgerNumber';
+    try {
+      final data = await _api.get(
+        ApiPaths.memberFines(ledgerNumber),
+        query: {'cooperative': cooperativeId},
+      );
+      final rows = _list(data, 'fines');
+      await _cache.putList(key, rows);
+      return Cached(rows.map(MemberFine.fromJson).toList());
+    } on ApiException catch (e) {
+      if (!e.isTransport) rethrow;
+      final rows = await _cache.getList(key);
+      if (rows == null) rethrow;
+      return Cached(rows.map(MemberFine.fromJson).toList(), stale: true);
+    }
+  }
+
+  /// Everything the cash in the collector's hand could settle, in one read.
+  ///
+  /// The obligations decide whether a receipt can be written at all, so a failure
+  /// there fails the screen. A fine raised against the member directly does not: it
+  /// is worth telling the collector it could not be read, and worth still letting
+  /// them take the contributions they came for.
+  Future<MemberCollectibles> memberCollectibles(
+    String cooperativeId,
+    String ledgerNumber,
+  ) async {
+    final obligations = await memberObligations(cooperativeId, ledgerNumber);
+    var fines = const Cached<MemberFine>([]);
+    var finesError = '';
+    try {
+      fines = await memberFines(cooperativeId, ledgerNumber);
+    } on ApiException catch (e) {
+      finesError = e.message;
+    }
+    return MemberCollectibles(
+      targets: CollectionTarget.spread(obligations.items, fines.items),
+      stale: obligations.stale || fines.stale,
+      finesError: finesError,
+    );
+  }
+
   /// Sends one queued receipt. The client reference travels with it, so a second
   /// send of the same receipt returns the collection the first one filed.
   Future<Collection> submitCollection(PendingCollection pending) async {
