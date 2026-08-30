@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/theme.dart';
 import '../data/api_client.dart';
@@ -98,11 +99,11 @@ class _MembersTabState extends State<MembersTab> {
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               hintText: 'Search by name, ledger number or phone',
-              prefixIcon: const Icon(Icons.search, size: 20),
+              prefixIcon: const Icon(Iconsax.search_normal, size: 20),
               suffixIcon: _search.text.isEmpty
                   ? null
                   : IconButton(
-                      icon: const Icon(Icons.close, size: 18),
+                      icon: const Icon(Iconsax.close_circle, size: 18),
                       onPressed: () {
                         _search.clear();
                         _query = '';
@@ -121,7 +122,7 @@ class _MembersTabState extends State<MembersTab> {
                   'still remit the cash you are holding.',
               tone: AppColors.danger,
               background: AppColors.dangerSoft,
-              icon: Icons.block,
+              icon: Iconsax.slash,
             ),
           ),
         Expanded(
@@ -134,7 +135,7 @@ class _MembersTabState extends State<MembersTab> {
               future: _future,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const SkeletonRows(count: 7);
                 }
                 if (snapshot.hasError) {
                   final error = snapshot.error;
@@ -142,7 +143,7 @@ class _MembersTabState extends State<MembersTab> {
                     children: [
                       const SizedBox(height: 60),
                       EmptyState(
-                        icon: Icons.wifi_off,
+                        icon: Iconsax.cloud_cross,
                         title: 'Could not load your round',
                         message: error is ApiException
                             ? error.message
@@ -158,7 +159,7 @@ class _MembersTabState extends State<MembersTab> {
                     children: [
                       const SizedBox(height: 60),
                       EmptyState(
-                        icon: Icons.groups_outlined,
+                        icon: Iconsax.profile_2user,
                         title: _query.isEmpty
                             ? 'No members on your round yet'
                             : 'Nobody matches "$_query"',
@@ -182,7 +183,7 @@ class _MembersTabState extends State<MembersTab> {
                           text: 'No connection — this is the round as it was the last '
                               'time this phone reached the cooperative. You can still '
                               'record; receipts go up when you have signal.',
-                          icon: Icons.cloud_off,
+                          icon: Iconsax.cloud_cross,
                         ),
                       );
                     }
@@ -274,7 +275,7 @@ class _MemberTile extends StatelessWidget {
               )
             : onTap == null
                 ? null
-                : const Icon(Icons.chevron_right, color: AppColors.muted),
+                : const Icon(Iconsax.arrow_right_3, color: AppColors.muted),
       ),
     );
   }

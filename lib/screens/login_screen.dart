@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/config.dart';
 import '../core/theme.dart';
@@ -147,7 +148,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   text: _error,
                   tone: AppColors.danger,
                   background: AppColors.dangerSoft,
-                  icon: Icons.error_outline,
+                  icon: Iconsax.danger,
                 ),
               ],
               const SizedBox(height: 22),

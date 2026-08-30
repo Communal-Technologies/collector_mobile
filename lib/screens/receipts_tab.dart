@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/money.dart';
 import '../core/theme.dart';
@@ -103,14 +104,14 @@ class _ReceiptsTabState extends State<ReceiptsTab> {
                   snapshot.connectionState == ConnectionState.waiting;
               final server = snapshot.data ?? const <Collection>[];
               if (waiting && local.isEmpty) {
-                return const Center(child: CircularProgressIndicator());
+                return const SkeletonRows(count: 5);
               }
               if (local.isEmpty && server.isEmpty) {
                 return ListView(
                   children: [
                     const SizedBox(height: 60),
                     EmptyState(
-                      icon: Icons.receipt_long_outlined,
+                      icon: Iconsax.receipt_item,
                       title: 'No receipts yet',
                       message: snapshot.hasError
                           ? snapshot.error is ApiException
@@ -151,7 +152,7 @@ class _ReceiptsTabState extends State<ReceiptsTab> {
                       text: snapshot.error is ApiException
                           ? (snapshot.error as ApiException).message
                           : 'Could not load the cooperative\'s copy of your receipts.',
-                      icon: Icons.cloud_off,
+                      icon: Iconsax.cloud_cross,
                     ),
                 ],
               );
@@ -285,7 +286,7 @@ class _CollectionTile extends StatelessWidget {
                     : 'Declined: ${collection.declineReason}',
                 tone: AppColors.danger,
                 background: AppColors.dangerSoft,
-                icon: Icons.error_outline,
+                icon: Iconsax.danger,
               ),
             ] else if (collection.isPending)
               const Padding(
@@ -360,7 +361,7 @@ class _PendingSheet extends StatelessWidget {
               tone: pending.rejected ? AppColors.danger : AppColors.warning,
               background:
                   pending.rejected ? AppColors.dangerSoft : AppColors.warningSoft,
-              icon: pending.rejected ? Icons.error_outline : Icons.cloud_off,
+              icon: pending.rejected ? Iconsax.danger : Iconsax.cloud_cross,
             ),
             const SizedBox(height: 16),
             FilledButton(

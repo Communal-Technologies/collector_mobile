@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/money.dart';
 import '../core/theme.dart';
@@ -120,7 +121,7 @@ class _RemitTabState extends State<RemitTab> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonRows(count: 4, height: 84);
           }
           if (snapshot.hasError) {
             final error = snapshot.error;
@@ -128,7 +129,7 @@ class _RemitTabState extends State<RemitTab> {
               children: [
                 const SizedBox(height: 60),
                 EmptyState(
-                  icon: Icons.wifi_off,
+                  icon: Iconsax.cloud_cross,
                   title: 'Could not open the remittance screen',
                   message: error is ApiException
                       ? error.message
@@ -186,7 +187,7 @@ class _RemitTabState extends State<RemitTab> {
                             'Your cooperative has not opened an account for you to '
                             'pay into. Ask an administrator to set one up before you '
                             'hand cash over.',
-                        icon: Icons.info_outline,
+                        icon: Iconsax.info_circle,
                       )
                     else ...[
                       const Text(
@@ -242,7 +243,7 @@ class _RemitTabState extends State<RemitTab> {
                               '${Money.format(data.standing!.cashInHand)} the '
                               'cooperative has you down as holding. Check the figure — '
                               'they may not accept it.',
-                          icon: Icons.warning_amber_rounded,
+                          icon: Iconsax.warning_2,
                         ),
                       ],
                       if (_error.isNotEmpty) ...[
@@ -251,7 +252,7 @@ class _RemitTabState extends State<RemitTab> {
                           text: _error,
                           tone: AppColors.danger,
                           background: AppColors.dangerSoft,
-                          icon: Icons.error_outline,
+                          icon: Iconsax.danger,
                         ),
                       ],
                       const SizedBox(height: 14),
@@ -385,7 +386,7 @@ class _AccountChoice extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                selected ? Icons.check_circle : Icons.circle_outlined,
+                selected ? Iconsax.tick_circle5 : Iconsax.record_circle,
                 size: 20,
                 color: selected ? AppColors.primary : AppColors.muted,
               ),

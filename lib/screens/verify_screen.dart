@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/config.dart';
 import '../core/theme.dart';
@@ -273,7 +274,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
                   text: _error,
                   tone: AppColors.danger,
                   background: AppColors.dangerSoft,
-                  icon: Icons.error_outline,
+                  icon: Iconsax.danger,
                 ),
               ],
               const SizedBox(height: 24),
@@ -353,7 +354,7 @@ class _GrantChoice extends StatelessWidget {
                 ),
               ),
               Icon(
-                selected ? Icons.check_circle : Icons.circle_outlined,
+                selected ? Iconsax.tick_circle5 : Iconsax.record_circle,
                 color: selected ? AppColors.primary : AppColors.line,
               ),
             ],

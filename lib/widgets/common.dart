@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/money.dart';
 import '../core/theme.dart';
@@ -234,7 +235,7 @@ class Notice extends StatelessWidget {
     required this.text,
     this.tone = AppColors.warning,
     this.background = AppColors.warningSoft,
-    this.icon = Icons.info_outline,
+    this.icon = Iconsax.info_circle,
   });
 
   final String text;
@@ -294,8 +295,8 @@ class OfflineNotice extends StatelessWidget {
                   ? 'Checking for a connection…'
                   : '$reason Tap here to check again.',
               icon: network.hasTransport
-                  ? Icons.cloud_off
-                  : Icons.signal_cellular_off,
+                  ? Iconsax.cloud_cross
+                  : Iconsax.wifi_square,
             ),
           ),
         );
@@ -452,11 +453,16 @@ class Skeleton extends StatefulWidget {
     this.height = 14,
     this.width,
     this.radius = 8,
+    this.color = const Color(0xFFEDEEF3),
   });
 
   final double height;
   final double? width;
   final double radius;
+
+  /// Overridden on the brand surface, where the grey of a white-page placeholder
+  /// reads as a rendering fault rather than as something loading.
+  final Color color;
 
   @override
   State<Skeleton> createState() => _SkeletonState();
@@ -485,7 +491,7 @@ class _SkeletonState extends State<Skeleton>
         height: widget.height,
         width: widget.width,
         decoration: BoxDecoration(
-          color: const Color(0xFFEDEEF3),
+          color: widget.color,
           borderRadius: BorderRadius.circular(widget.radius),
         ),
       ),

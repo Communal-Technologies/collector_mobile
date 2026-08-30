@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/money.dart';
 import '../core/theme.dart';
@@ -61,7 +62,7 @@ class _EarningsTabState extends State<EarningsTab> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonRows(count: 4, height: 84);
           }
           if (snapshot.hasError) {
             final error = snapshot.error;
@@ -69,7 +70,7 @@ class _EarningsTabState extends State<EarningsTab> {
               children: [
                 const SizedBox(height: 60),
                 EmptyState(
-                  icon: Icons.wifi_off,
+                  icon: Iconsax.cloud_cross,
                   title: 'Could not load your earnings',
                   message: error is ApiException
                       ? error.message
@@ -137,7 +138,7 @@ class _EarningsTabState extends State<EarningsTab> {
                   text: 'Commission is paid out by the cooperative in a batch, and every '
                       'payout needs two administrators to sign it off. Nothing here is '
                       'lost while it waits.',
-                  icon: Icons.info_outline,
+                  icon: Iconsax.info_circle,
                 ),
               const SizedBox(height: 14),
               SectionCard(

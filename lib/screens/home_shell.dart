@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/money.dart';
 import '../core/theme.dart';
@@ -202,12 +203,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           if (session.grants.length > 1)
             IconButton(
               tooltip: 'Switch cooperative',
-              icon: const Icon(Icons.swap_horiz),
+              icon: const Icon(Iconsax.arrow_swap_horizontal),
               onPressed: () => _switchCooperative(session.grants),
             ),
           IconButton(
             tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Iconsax.logout),
             onPressed: _confirmSignOut,
           ),
         ],
@@ -225,23 +226,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         onDestinationSelected: (index) => setState(() => _tab = index),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
-            selectedIcon: Icon(Icons.groups),
+            icon: Icon(Iconsax.profile_2user),
+            selectedIcon: Icon(Iconsax.profile_2user5),
             label: 'Round',
           ),
           NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(Icons.receipt_long),
+            icon: Icon(Iconsax.receipt_item),
+            selectedIcon: Icon(Iconsax.receipt_item5),
             label: 'Receipts',
           ),
           NavigationDestination(
-            icon: Icon(Icons.account_balance_outlined),
-            selectedIcon: Icon(Icons.account_balance),
+            icon: Icon(Iconsax.bank),
+            selectedIcon: Icon(Iconsax.bank5),
             label: 'Remit',
           ),
           NavigationDestination(
-            icon: Icon(Icons.savings_outlined),
-            selectedIcon: Icon(Icons.savings),
+            icon: Icon(Iconsax.money_recive),
+            selectedIcon: Icon(Iconsax.money_recive5),
             label: 'Earnings',
           ),
         ],
@@ -277,7 +278,7 @@ class _StandingHeader extends StatelessWidget {
             headroom <= limit ~/ 10;
         return Container(
           width: double.infinity,
-          color: AppColors.primary,
+          decoration: const BoxDecoration(gradient: AppGradients.brand),
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -286,15 +287,18 @@ class _StandingHeader extends StatelessWidget {
                 'Cash in your hands',
                 style: TextStyle(color: Colors.white70, fontSize: 12),
               ),
-              const SizedBox(height: 4),
-              Text(
-                standing == null ? '—' : Money.format(standing.cashInHand),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
+              const SizedBox(height: 6),
+              if (standing == null && !snapshot.hasError)
+                const Skeleton(height: 30, width: 170, color: Colors.white24)
+              else
+                Text(
+                  standing == null ? '—' : Money.format(standing.cashInHand),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
               const SizedBox(height: 6),
               if (standing != null)
                 Text(
@@ -308,28 +312,33 @@ class _StandingHeader extends StatelessWidget {
                   'Could not reach the cooperative. Showing what is on this phone.',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
-              if (limit != null) ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: tight ? Colors.white : Colors.white24,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    headroom == null
-                        ? 'Limit ${Money.formatWhole(limit)}'
-                        : 'Limit ${Money.formatWhole(limit)} · '
-                              '${Money.format(headroom)} left before you must remit',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: tight ? AppColors.primary : Colors.white,
+              if (limit != null && limit > 0) ...[
+                const SizedBox(height: 12),
+                MeterBar(
+                  fraction: (standing?.cashInHand ?? 0) / limit,
+                  height: 7,
+                  fill: tight ? AppColors.warning : Colors.white,
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        headroom == null
+                            ? 'Cash limit ${Money.formatWhole(limit)}'
+                            : '${Money.format(headroom)} left before you must remit',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: tight ? FontWeight.w800 : FontWeight.w600,
+                          color: tight ? Colors.white : Colors.white70,
+                        ),
+                      ),
                     ),
-                  ),
+                    Text(
+                      'of ${Money.formatWhole(limit)}',
+                      style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -367,8 +376,8 @@ class _ConnectionBanner extends StatelessWidget {
                 children: [
                   Icon(
                     network.hasTransport
-                        ? Icons.cloud_off
-                        : Icons.signal_cellular_off,
+                        ? Iconsax.cloud_cross
+                        : Iconsax.wifi_square,
                     size: 18,
                     color: AppColors.muted,
                   ),
@@ -433,7 +442,7 @@ class _OutboxBanner extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(
-                    rejected > 0 ? Icons.error_outline : Icons.cloud_off,
+                    rejected > 0 ? Iconsax.danger : Iconsax.cloud_cross,
                     size: 18,
                     color: rejected > 0 ? AppColors.danger : AppColors.warning,
                   ),

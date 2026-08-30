@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:iconsax/iconsax.dart';
 
 import '../core/config.dart';
 import '../core/theme.dart';
@@ -335,8 +336,8 @@ class SplashBlocked extends StatelessWidget {
                   children: [
                     Icon(
                       hasTransport
-                          ? Icons.cloud_off
-                          : Icons.signal_cellular_off,
+                          ? Iconsax.cloud_cross
+                          : Iconsax.wifi_square,
                       color: AppColors.primary,
                       size: 30.sp,
                     ),
