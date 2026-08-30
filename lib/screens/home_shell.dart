@@ -235,9 +235,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             selectedIcon: Icon(Iconsax.receipt_item5),
             label: 'Receipts',
           ),
+          // The same bank in both states. Iconsax's filled bank sits at U+033A, a
+          // combining mark, so a shaper gives it no advance and offsets it by an
+          // em — the glyph paints a tab's width to the left of where it belongs.
+          // The purple pill and the bold purple label are what say "selected".
           NavigationDestination(
             icon: Icon(Iconsax.bank),
-            selectedIcon: Icon(Iconsax.bank5),
+            selectedIcon: Icon(Iconsax.bank),
             label: 'Remit',
           ),
           NavigationDestination(

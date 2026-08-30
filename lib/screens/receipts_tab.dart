@@ -202,10 +202,19 @@ class _PendingTile extends StatelessWidget {
           pending.memberName.isEmpty ? pending.ledgerNumber : pending.memberName,
           style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
-        subtitle: Text(
-          'Receipt ${ReceiptBook.bookNumber(pending.clientReference)} · '
-          '${Dates.dayTime(pending.collectedAt)}',
-          style: const TextStyle(fontSize: 12),
+        isThreeLine: true,
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Receipt ${ReceiptBook.bookNumber(pending.clientReference)}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            Text(
+              Dates.dayTime(pending.collectedAt),
+              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+          ],
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -246,9 +255,18 @@ class _CollectionTile extends StatelessWidget {
                 : collection.memberName,
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
           ),
-          subtitle: Text(
-            '${collection.reference} · ${Dates.dayTime(collection.collectedAt ?? collection.createdAt)}',
-            style: const TextStyle(fontSize: 12),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                collection.reference,
+                style: const TextStyle(fontSize: 12),
+              ),
+              Text(
+                Dates.dayTime(collection.collectedAt ?? collection.createdAt),
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+            ],
           ),
           trailing: Column(
             mainAxisAlignment: MainAxisAlignment.center,

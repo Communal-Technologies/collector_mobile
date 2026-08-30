@@ -389,7 +389,7 @@ class _AccountChoice extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                selected ? Iconsax.tick_circle5 : Iconsax.record_circle,
+                selected ? Iconsax.tick_circle : Iconsax.record_circle,
                 size: 20,
                 color: selected ? AppColors.primary : AppColors.muted,
               ),
