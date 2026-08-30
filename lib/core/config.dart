@@ -104,6 +104,11 @@ class ApiPaths {
   static String memberObligations(String ledgerNumber) =>
       '$_obl/members/$ledgerNumber/obligations';
 
+  /// Only the fines raised against the member directly. The ones a missed cycle
+  /// earned already ride inside their own obligation.
+  static String memberFines(String ledgerNumber) =>
+      '$_obl/members/$ledgerNumber/fines';
+
   static const String _coop = '/api/cooperative/v2/collector';
   static const String myCollectorAccounts = '$_coop/accounts';
   static const String remittanceAccounts = '$_coop/remittance-accounts';
