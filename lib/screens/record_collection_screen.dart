@@ -5,7 +5,6 @@ import 'package:iconsax/iconsax.dart';
 import '../core/money.dart';
 import '../core/theme.dart';
 import '../data/api_client.dart';
-import '../data/local_cache.dart';
 import '../data/models.dart';
 import '../data/outbox.dart';
 import '../data/repository.dart';
@@ -13,6 +12,10 @@ import '../state/outbox_cubit.dart';
 import '../widgets/common.dart';
 
 /// Which of the member's obligation accounts the collector is looking at.
+///
+/// `due` is a recurring account's question and nothing else's: a one-off commitment
+/// has no cycle to have fallen behind on, so it can never be due now — only
+/// incomplete. A fine belongs here once the day it was raised for has passed.
 enum _Lens { due, owing, all }
 
 /// Writing the receipt.
@@ -51,16 +54,17 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
   final _note = TextEditingController();
   final _search = TextEditingController();
 
-  /// Kobo against each obligation, keyed by `account_code`.
+  /// Kobo against each thing the cash can settle, keyed by the target's own key —
+  /// an `account_code` for an obligation, the fine's id for a fine.
   ///
-  /// Held here rather than in a controller per obligation because the list is now
-  /// filtered and built lazily: a row that scrolls out of view or falls out of the
-  /// filter takes its controller with it, and a figure the collector had already
-  /// entered would go with it. The code is what the receipt is built from, so what
-  /// the screen shows can change freely without touching the money.
+  /// Held here rather than in a controller per row because the list is filtered and
+  /// built lazily: a row that scrolls out of view or falls out of the filter takes
+  /// its controller with it, and a figure the collector had already entered would go
+  /// with it. The key is what the receipt is built from, so what the screen shows can
+  /// change freely without touching the money.
   final Map<String, int> _allocated = {};
 
-  Future<Cached<MemberObligation>>? _future;
+  Future<MemberCollectibles>? _future;
   CollectorStanding? _standing;
   _Lens _lens = _Lens.owing;
   String _query = '';
@@ -70,7 +74,7 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
   @override
   void initState() {
     super.initState();
-    _future = context.read<CollectorRepository>().memberObligations(
+    _future = context.read<CollectorRepository>().memberCollectibles(
           widget.grant.cooperativeId,
           widget.member.ledgerNumber,
         );
@@ -120,8 +124,11 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     return standing.headroom! - queued;
   }
 
-  bool _isOverdue(MemberObligation obligation) {
-    final due = obligation.nextDueDate;
+  /// A one-off commitment is never overdue. It has no cycle and the server sends it
+  /// no due date, so what would be shown here is a deadline the cooperative never
+  /// set — the member is behind on nothing, they are simply not finished yet.
+  bool _isOverdue(CollectionTarget target) {
+    final due = target.nextDueDate;
     if (due == null) return false;
     final now = DateTime.now();
     return !due.isAfter(DateTime(now.year, now.month, now.day));
@@ -130,10 +137,10 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
   /// Overdue and owing first, then owing by what is left on it, then settled — and
   /// alphabetically inside each band so the same account is always in the same place
   /// on the round.
-  List<MemberObligation> _ordered(List<MemberObligation> list) {
-    int band(MemberObligation o) {
-      if (o.outstanding <= 0) return 2;
-      return _isOverdue(o) ? 0 : 1;
+  List<CollectionTarget> _ordered(List<CollectionTarget> list) {
+    int band(CollectionTarget t) {
+      if (t.outstanding <= 0) return 2;
+      return _isOverdue(t) ? 0 : 1;
     }
 
     final sorted = [...list];
@@ -148,53 +155,53 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     return sorted;
   }
 
-  List<MemberObligation> _visible(List<MemberObligation> ordered) {
+  List<CollectionTarget> _visible(List<CollectionTarget> ordered) {
     final query = _query.trim().toLowerCase();
-    return ordered.where((o) {
-      // An account with money already against it is never hidden, whatever the
-      // lens or the search says. The collector has to be able to see every line
-      // they are about to sign for.
-      if ((_allocated[o.accountCode] ?? 0) > 0) return true;
+    return ordered.where((t) {
+      // A row with money already against it is never hidden, whatever the lens or
+      // the search says. The collector has to be able to see every line they are
+      // about to sign for.
+      if ((_allocated[t.key] ?? 0) > 0) return true;
       switch (_lens) {
         case _Lens.due:
-          if (o.outstanding <= 0 || !_isOverdue(o)) return false;
+          if (t.outstanding <= 0 || !_isOverdue(t)) return false;
         case _Lens.owing:
-          if (o.outstanding <= 0) return false;
+          if (t.outstanding <= 0) return false;
         case _Lens.all:
           break;
       }
       if (query.isEmpty) return true;
-      return o.title.toLowerCase().contains(query) ||
-          o.accountCode.toLowerCase().contains(query);
+      return t.title.toLowerCase().contains(query) ||
+          t.obligationCode.toLowerCase().contains(query);
     }).toList();
   }
 
-  Future<void> _editAmount(MemberObligation obligation) async {
+  Future<void> _editAmount(CollectionTarget target) async {
     final amount = await showModalBottomSheet<int>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _AmountSheet(
-        obligation: obligation,
-        initial: _allocated[obligation.accountCode] ?? 0,
-        overdue: _isOverdue(obligation),
+        target: target,
+        initial: _allocated[target.key] ?? 0,
+        overdue: _isOverdue(target),
       ),
     );
     if (amount == null) return;
     setState(() {
       if (amount <= 0) {
-        _allocated.remove(obligation.accountCode);
+        _allocated.remove(target.key);
       } else {
-        _allocated[obligation.accountCode] = amount;
+        _allocated[target.key] = amount;
       }
       _error = '';
     });
   }
 
-  void _fillOwed(List<MemberObligation> obligations) {
+  void _fillOwed(List<CollectionTarget> targets) {
     setState(() {
-      for (final obligation in obligations) {
-        if (obligation.outstanding > 0) {
-          _allocated[obligation.accountCode] = obligation.outstanding;
+      for (final target in targets) {
+        if (target.outstanding > 0) {
+          _allocated[target.key] = target.outstanding;
         }
       }
       _error = '';
@@ -208,8 +215,8 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     });
   }
 
-  Future<void> _openReview(List<MemberObligation> obligations) async {
-    final byCode = {for (final o in obligations) o.accountCode: o};
+  Future<void> _openReview(List<CollectionTarget> targets) async {
+    final byKey = {for (final t in targets) t.key: t};
     final edit = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -218,41 +225,42 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
           for (final entry in _allocated.entries)
             if (entry.value > 0)
               _ReviewLine(
-                code: entry.key,
-                title: byCode[entry.key]?.title ?? entry.key,
+                key: entry.key,
+                title: byKey[entry.key]?.title ?? entry.key,
                 amount: entry.value,
               ),
         ],
         total: _total,
         note: _note,
         postsOnCollection: widget.grant.postsOnCollection,
-        onRemove: (code) => setState(() {
-          _allocated.remove(code);
+        onRemove: (key) => setState(() {
+          _allocated.remove(key);
           _error = '';
         }),
       ),
     );
     if (!mounted || edit == null) return;
-    final obligation = byCode[edit];
-    if (obligation != null) await _editAmount(obligation);
+    final target = byKey[edit];
+    if (target != null) await _editAmount(target);
   }
 
-  Future<void> _record(List<MemberObligation> obligations) async {
+  Future<void> _record(List<CollectionTarget> targets) async {
     // Built off the full list, never the filtered one: a lens or a search must not
     // be able to drop an amount the collector already entered.
     final allocations = <CollectionAllocation>[];
-    for (final obligation in obligations) {
-      final amount = _allocated[obligation.accountCode] ?? 0;
+    for (final target in targets) {
+      final amount = _allocated[target.key] ?? 0;
       if (amount <= 0) continue;
       allocations.add(CollectionAllocation(
-        obligationCode: obligation.accountCode,
-        title: obligation.title,
+        obligationCode: target.obligationCode,
+        fineId: target.fineId,
+        title: target.title,
         amount: amount,
       ));
     }
     if (allocations.isEmpty) {
-      setState(() =>
-          _error = 'Enter what the member paid against at least one obligation.');
+      setState(() => _error =
+          'Enter what the member paid against at least one account or fine.');
       return;
     }
     final total = allocations.fold<int>(0, (sum, a) => sum + a.amount);
@@ -346,7 +354,7 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
           ],
         ),
       ),
-      body: FutureBuilder<Cached<MemberObligation>>(
+      body: FutureBuilder<MemberCollectibles>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -363,8 +371,8 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
             );
           }
           final result = snapshot.data!;
-          final obligations = _ordered(result.items);
-          if (obligations.isEmpty) {
+          final targets = _ordered(result.targets);
+          if (targets.isEmpty) {
             return const EmptyState(
               icon: Iconsax.archive_book,
               title: 'Nothing to collect against',
@@ -375,22 +383,23 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
           return Column(
             children: [
               _Header(
-                obligations: obligations,
+                targets: targets,
                 stale: result.stale,
+                finesError: result.finesError,
                 member: widget.member,
                 postsOnCollection: widget.grant.postsOnCollection,
-                onFillOwed: _blocked ? null : () => _fillOwed(obligations),
+                onFillOwed: _blocked ? null : () => _fillOwed(targets),
                 onClear:
                     _blocked || _allocated.isEmpty ? null : _clearAll,
               ),
-              if (obligations.length > _lensThreshold)
+              if (targets.length > _lensThreshold)
                 _LensBar(
                   lens: _lens,
                   search: _search,
                   onLens: (lens) => setState(() => _lens = lens),
                   onQuery: (value) => setState(() => _query = value),
                 ),
-              Expanded(child: _list(obligations)),
+              Expanded(child: _list(targets)),
               _BottomBar(
                 total: _total,
                 lines: _lines,
@@ -400,10 +409,10 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
                 error: _error,
                 saving: _saving,
                 blocked: _blocked,
-                onReview: _lines == 0 ? null : () => _openReview(obligations),
+                onReview: _lines == 0 ? null : () => _openReview(targets),
                 onRecord: _saving || _total <= 0 || _blocked
                     ? null
-                    : () => _record(obligations),
+                    : () => _record(targets),
               ),
             ],
           );
@@ -412,8 +421,8 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     );
   }
 
-  Widget _list(List<MemberObligation> obligations) {
-    final visible = _visible(obligations);
+  Widget _list(List<CollectionTarget> targets) {
+    final visible = _visible(targets);
     if (visible.isEmpty) {
       // In a list rather than on its own: the header, the lens bar and the bottom
       // bar leave this little height on a short screen, and an empty state that
@@ -425,7 +434,7 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
             title: _query.isNotEmpty
                 ? 'No account matches "$_query"'
                 : _lens == _Lens.due
-                    ? 'Nothing is overdue'
+                    ? 'Nothing has fallen due'
                     : 'Nothing is outstanding',
             message: 'The member may still pay into any of their accounts.',
             action: OutlinedButton(
@@ -445,12 +454,12 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
       itemCount: visible.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
-        final obligation = visible[index];
-        return _ObligationRow(
-          obligation: obligation,
-          allocated: _allocated[obligation.accountCode] ?? 0,
-          overdue: _isOverdue(obligation),
-          onTap: _blocked ? null : () => _editAmount(obligation),
+        final target = visible[index];
+        return _TargetRow(
+          target: target,
+          allocated: _allocated[target.key] ?? 0,
+          overdue: _isOverdue(target),
+          onTap: _blocked ? null : () => _editAmount(target),
         );
       },
     );
@@ -463,16 +472,18 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
 /// simply pays everything.
 class _Header extends StatelessWidget {
   const _Header({
-    required this.obligations,
+    required this.targets,
     required this.stale,
+    required this.finesError,
     required this.member,
     required this.postsOnCollection,
     required this.onFillOwed,
     required this.onClear,
   });
 
-  final List<MemberObligation> obligations;
+  final List<CollectionTarget> targets;
   final bool stale;
+  final String finesError;
   final CollectorMember member;
   final bool postsOnCollection;
   final VoidCallback? onFillOwed;
@@ -480,8 +491,10 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final owed = obligations.fold<int>(0, (sum, o) => sum + o.outstanding);
-    final owing = obligations.where((o) => o.outstanding > 0).length;
+    final owed = targets.fold<int>(0, (sum, t) => sum + t.outstanding);
+    final owing = targets.where((t) => t.outstanding > 0).length;
+    final fines = targets.where((t) => t.isFine).length;
+    final accounts = targets.length - fines;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -511,6 +524,16 @@ class _Header extends StatelessWidget {
                 icon: Iconsax.cloud_cross,
               ),
             ),
+          if (finesError.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Notice(
+                text: 'Any fine raised against this member directly could not be '
+                    'read — $finesError. The accounts below are still collectable, '
+                    'and so are the fines shown against them.',
+                icon: Iconsax.warning_2,
+              ),
+            ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -529,8 +552,8 @@ class _Header extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${obligations.length} '
-                      '${obligations.length == 1 ? 'account' : 'accounts'}'
+                      '$accounts ${accounts == 1 ? 'account' : 'accounts'}'
+                      '${fines > 0 ? ' · $fines ${fines == 1 ? 'fine' : 'fines'}' : ''}'
                       '${owing > 0 ? ' · $owing owing' : ''} · '
                       '${postsOnCollection ? 'posts as you record' : 'waits to be countersigned'}',
                       style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
@@ -628,25 +651,32 @@ class _LensBar extends StatelessWidget {
   }
 }
 
-/// One obligation on one line: what it is, what stands against it, and what the
+/// One thing on one line: what it is, what stands against it, and what the
 /// collector has put against it so far.
-class _ObligationRow extends StatelessWidget {
-  const _ObligationRow({
-    required this.obligation,
+///
+/// The three kinds read differently on purpose. A recurring account is a cycle, so
+/// it carries what is outstanding and when it falls due. A one-off commitment has no
+/// cycle to fall due in — it is paid in instalments until it is complete — so it
+/// carries progress towards its target and no date at all. A fine is a fixed penalty
+/// settled once, and is marked as one so nobody mistakes it for a contribution.
+class _TargetRow extends StatelessWidget {
+  const _TargetRow({
+    required this.target,
     required this.allocated,
     required this.overdue,
     required this.onTap,
   });
 
-  final MemberObligation obligation;
+  final CollectionTarget target;
   final int allocated;
   final bool overdue;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final outstanding = obligation.outstanding;
+    final outstanding = target.outstanding;
     final filled = allocated > 0;
+    final progress = !target.isFine && !target.recurring && target.amount > 0;
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(AppRadius.card),
@@ -668,14 +698,26 @@ class _ObligationRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      obligation.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        if (target.isFine)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 6),
+                            child: Icon(Iconsax.slash,
+                                size: 13, color: AppColors.danger),
+                          ),
+                        Expanded(
+                          child: Text(
+                            target.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 3),
                     // One line rather than a row of two: an account name and a
@@ -685,19 +727,18 @@ class _ObligationRow extends StatelessWidget {
                       TextSpan(
                         children: [
                           TextSpan(
-                            text: outstanding > 0
-                                ? '${Money.formatWhole(outstanding)} outstanding'
-                                : 'Settled',
+                            text: _standing,
                             style: TextStyle(
                               color: outstanding > 0
                                   ? AppColors.muted
                                   : AppColors.success,
                             ),
                           ),
-                          if (obligation.nextDueDate != null)
+                          if (target.nextDueDate != null)
                             TextSpan(
-                              text:
-                                  '  · ${overdue ? 'due' : 'by'} ${Dates.day(obligation.nextDueDate)}',
+                              text: target.isFine
+                                  ? '  · for ${Dates.day(target.nextDueDate)}'
+                                  : '  · ${overdue ? 'due' : 'by'} ${Dates.day(target.nextDueDate)}',
                               style: TextStyle(
                                 fontWeight:
                                     overdue ? FontWeight.w700 : FontWeight.w400,
@@ -711,6 +752,17 @@ class _ObligationRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 11.5),
                     ),
+                    if (progress) ...[
+                      const SizedBox(height: 6),
+                      MeterBar(
+                        fraction: target.amountPaid / target.amount,
+                        height: 4,
+                        fill: outstanding > 0
+                            ? AppColors.primary
+                            : AppColors.success,
+                        track: AppColors.line,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -739,6 +791,24 @@ class _ObligationRow extends StatelessWidget {
       ),
     );
   }
+
+  String get _standing {
+    final outstanding = target.outstanding;
+    if (target.isFine) {
+      return outstanding > 0
+          ? '${Money.formatWhole(outstanding)} to settle'
+          : 'Settled';
+    }
+    if (!target.recurring) {
+      return outstanding > 0
+          ? '${Money.formatWhole(target.amountPaid)} of '
+              '${Money.formatWhole(target.amount)} paid'
+          : 'Complete';
+    }
+    return outstanding > 0
+        ? '${Money.formatWhole(outstanding)} outstanding'
+        : 'Settled';
+  }
 }
 
 /// The amount for one obligation, on its own.
@@ -748,12 +818,12 @@ class _ObligationRow extends StatelessWidget {
 /// attention for the moment they are entering it.
 class _AmountSheet extends StatefulWidget {
   const _AmountSheet({
-    required this.obligation,
+    required this.target,
     required this.initial,
     required this.overdue,
   });
 
-  final MemberObligation obligation;
+  final CollectionTarget target;
   final int initial;
   final bool overdue;
 
@@ -778,9 +848,13 @@ class _AmountSheetState extends State<_AmountSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final obligation = widget.obligation;
-    final outstanding = obligation.outstanding;
+    final target = widget.target;
+    final outstanding = target.outstanding;
     final entered = moneyFieldMinor(_amount);
+    // A fine is a fixed penalty, not an account that holds a balance, so there is
+    // nowhere for an excess to go. The service refuses it; refusing it here means the
+    // collector is told before the member is given a receipt for it.
+    final excess = target.isFine && entered > outstanding;
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -793,18 +867,12 @@ class _AmountSheetState extends State<_AmountSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            obligation.title,
+            target.title,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(
-            [
-              outstanding > 0
-                  ? '${Money.format(outstanding)} outstanding of ${Money.format(obligation.amount)}'
-                  : 'Nothing outstanding on this account',
-              if (obligation.nextDueDate != null)
-                '${widget.overdue ? 'was due' : 'due'} ${Dates.day(obligation.nextDueDate)}',
-            ].join(' · '),
+            _standing(target),
             style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
           ),
           const SizedBox(height: 16),
@@ -820,13 +888,21 @@ class _AmountSheetState extends State<_AmountSheet> {
             children: [
               if (outstanding > 0)
                 ActionChip(
-                  label: Text('Pay all ${Money.formatWhole(outstanding)}'),
+                  label: Text(
+                    '${target.isFine ? 'Settle' : target.recurring ? 'Pay all' : 'Pay the rest'} '
+                    '${Money.formatWhole(outstanding)}',
+                  ),
                   onPressed: () => _set(outstanding),
                 ),
-              if (obligation.amount > 0 && obligation.amount != outstanding)
+              // The standing charge is one cycle of a recurring account. A one-off
+              // has no cycle and its whole target is the wrong figure to offer as a
+              // single payment, and a fine has only itself to settle.
+              if (target.recurring &&
+                  target.amount > 0 &&
+                  target.amount != outstanding)
                 ActionChip(
-                  label: Text('Standing ${Money.formatWhole(obligation.amount)}'),
-                  onPressed: () => _set(obligation.amount),
+                  label: Text('Standing ${Money.formatWhole(target.amount)}'),
+                  onPressed: () => _set(target.amount),
                 ),
               if (widget.initial > 0)
                 ActionChip(
@@ -836,15 +912,27 @@ class _AmountSheetState extends State<_AmountSheet> {
                 ),
             ],
           ),
+          if (excess) ...[
+            const SizedBox(height: 12),
+            Notice(
+              text: 'A fine can only take the ${Money.format(outstanding)} still '
+                  'standing on it. Put the rest against one of the member\'s accounts.',
+              tone: AppColors.danger,
+              background: AppColors.dangerSoft,
+              icon: Iconsax.danger,
+            ),
+          ],
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: entered <= 0 && widget.initial <= 0
+              onPressed: excess || (entered <= 0 && widget.initial <= 0)
                   ? null
                   : () => Navigator.of(context).pop(entered),
               child: Text(entered <= 0
-                  ? 'Leave this account'
+                  ? target.isFine
+                      ? 'Leave this fine'
+                      : 'Leave this account'
                   : '${widget.initial > 0 ? 'Update' : 'Add'} ${Money.format(entered)}'),
             ),
           ),
@@ -852,16 +940,47 @@ class _AmountSheetState extends State<_AmountSheet> {
       ),
     );
   }
+
+  /// What stands against this one, in the terms it is actually owed in.
+  String _standing(CollectionTarget target) {
+    final outstanding = target.outstanding;
+    if (target.isFine) {
+      final parts = [
+        outstanding > 0
+            ? '${Money.format(outstanding)} of the ${Money.format(target.amount)} '
+                'fine still standing'
+            : 'This fine has been settled',
+        if (target.nextDueDate != null)
+          'raised for ${Dates.day(target.nextDueDate)}',
+      ];
+      return parts.join(' · ');
+    }
+    if (!target.recurring) {
+      return outstanding > 0
+          ? '${Money.format(target.amountPaid)} of ${Money.format(target.amount)} '
+              'paid — ${Money.format(outstanding)} left to complete it'
+          : 'This commitment is complete';
+    }
+    final parts = [
+      outstanding > 0
+          ? '${Money.format(outstanding)} outstanding of ${Money.format(target.amount)}'
+          : 'Nothing outstanding on this account',
+      if (target.nextDueDate != null)
+        '${widget.overdue ? 'was due' : 'due'} ${Dates.day(target.nextDueDate)}',
+    ];
+    return parts.join(' · ');
+  }
 }
 
 class _ReviewLine {
   const _ReviewLine({
-    required this.code,
+    required this.key,
     required this.title,
     required this.amount,
   });
 
-  final String code;
+  /// The target's own key — an account code, or a namespaced fine id.
+  final String key;
   final String title;
   final int amount;
 }
@@ -929,7 +1048,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                   children: [
                     Expanded(
                       child: InkWell(
-                        onTap: () => Navigator.of(context).pop(line.code),
+                        onTap: () => Navigator.of(context).pop(line.key),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Row(
@@ -962,7 +1081,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                     IconButton(
                       icon: const Icon(Iconsax.trash, size: 17, color: AppColors.danger),
                       onPressed: () {
-                        widget.onRemove(line.code);
+                        widget.onRemove(line.key);
                         setState(() => _lines.remove(line));
                         if (_lines.isEmpty) Navigator.of(context).pop();
                       },
