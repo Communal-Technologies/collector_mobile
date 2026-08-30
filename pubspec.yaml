@@ -42,6 +42,7 @@ flutter_launcher_icons:
   background_color_android: "#FFFFFF"
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/images/launcher_icon_foreground_black.png"
+  adaptive_icon_foreground_inset: 0
   min_sdk_android: 21
 
 flutter:
