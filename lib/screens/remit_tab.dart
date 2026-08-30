@@ -184,9 +184,9 @@ class _RemitTabState extends State<RemitTab> {
                     if (data.accounts.isEmpty)
                       const Notice(
                         text:
-                            'Your cooperative has not opened an account for you to '
-                            'pay into. Ask an administrator to set one up before you '
-                            'hand cash over.',
+                            'Your cooperative has no bank account for you to pay '
+                            'into. Cash is handed in at the bank, so ask an '
+                            'administrator to add one before you hand cash over.',
                         icon: Iconsax.info_circle,
                       )
                     else ...[
