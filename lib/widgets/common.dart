@@ -139,18 +139,32 @@ class StatusChip extends StatelessWidget {
         foreground = AppColors.warning;
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(8, 4, 10, 4),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
-      child: Text(
-        label ?? status,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: foreground,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 6,
+            width: 6,
+            decoration: BoxDecoration(
+              color: foreground,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label ?? status,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: foreground,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -180,8 +194,17 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 44, color: AppColors.muted),
-            const SizedBox(height: 12),
+            Container(
+              height: 72,
+              width: 72,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: AppColors.primarySoft,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 32, color: AppColors.primary),
+            ),
+            const SizedBox(height: 16),
             Text(
               title,
               textAlign: TextAlign.center,
@@ -407,6 +430,147 @@ class AmountRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A grey block that breathes, standing in for a figure that has not arrived.
+///
+/// A collector on a village link waits several seconds for every list in this app. A
+/// spinner over an empty page says only "wait"; the placeholders say what is coming
+/// and how much of it, and the page does not jump when the real rows land on top of
+/// the same shapes.
+class Skeleton extends StatefulWidget {
+  const Skeleton({
+    super.key,
+    this.height = 14,
+    this.width,
+    this.radius = 8,
+  });
+
+  final double height;
+  final double? width;
+  final double radius;
+
+  @override
+  State<Skeleton> createState() => _SkeletonState();
+}
+
+class _SkeletonState extends State<Skeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.45, end: 1).animate(
+        CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+      ),
+      child: Container(
+        height: widget.height,
+        width: widget.width,
+        decoration: BoxDecoration(
+          color: const Color(0xFFEDEEF3),
+          borderRadius: BorderRadius.circular(widget.radius),
+        ),
+      ),
+    );
+  }
+}
+
+/// Placeholder rows in the shape of the list that is loading.
+class SkeletonRows extends StatelessWidget {
+  const SkeletonRows({
+    super.key,
+    this.count = 5,
+    this.height = 68,
+    this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 24),
+  });
+
+  final int count;
+  final double height;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: padding,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: count,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (_, _) => Container(
+        height: height,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Row(
+          children: [
+            const Skeleton(height: 38, width: 38, radius: 12),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Skeleton(height: 13, width: 150),
+                  SizedBox(height: 8),
+                  Skeleton(height: 10, width: 96),
+                ],
+              ),
+            ),
+            const Skeleton(height: 12, width: 52),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// How much of a ceiling has been used. Drawn rather than described, because a
+/// collector reads "nearly full" off a bar faster than off two figures.
+class MeterBar extends StatelessWidget {
+  const MeterBar({
+    super.key,
+    required this.fraction,
+    this.height = 6,
+    this.fill = Colors.white,
+    this.track = Colors.white24,
+  });
+
+  final double fraction;
+  final double height;
+  final Color fill;
+  final Color track;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = fraction.isNaN ? 0.0 : fraction.clamp(0.0, 1.0);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(height),
+      child: SizedBox(
+        height: height,
+        child: Stack(
+          children: [
+            Container(color: track),
+            FractionallySizedBox(
+              widthFactor: value,
+              child: Container(color: fill),
+            ),
+          ],
+        ),
       ),
     );
   }
