@@ -44,6 +44,150 @@ void main() {
         expect(unnamed.outstanding, 0);
       },
     );
+
+    test('a one-off commitment carries no cycle and no due date', () {
+      final equity = MemberObligation.fromJson({
+        'account_code': 'Dco-C-936038',
+        'account_name': 'Share Capital',
+        'amount': 15500000,
+        'amount_paid': 2000000,
+        'category': '1523',
+        'recurring': false,
+      });
+      expect(equity.recurring, isFalse);
+      expect(equity.frequency, '');
+      expect(equity.nextDueDate, isNull);
+      expect(equity.outstanding, 13500000);
+    });
+
+    test('patronage recurs on the frequency the cooperative set', () {
+      final patronage = MemberObligation.fromJson({
+        'account_code': 'Dco-C-180302',
+        'amount': 500000,
+        'category': '1524',
+        'recurring': true,
+        'frequency': 'monthly',
+        'next_due_date': '2026-09-30T00:00:00Z',
+      });
+      expect(patronage.recurring, isTrue);
+      expect(patronage.frequency, 'monthly');
+      expect(patronage.nextDueDate, isNotNull);
+    });
+
+    test(
+      'a service that sends no recurring flag is read off the due date',
+      () {
+        // Every account looked recurring before the distinction existed, and a due
+        // date is the honest signal of one: the service only ever computed one for
+        // an account with a cycle to fall due in.
+        expect(
+          MemberObligation.fromJson({
+            'account_code': 'A',
+            'next_due_date': '2026-09-30T00:00:00Z',
+          }).recurring,
+          isTrue,
+        );
+        expect(
+          MemberObligation.fromJson({'account_code': 'A'}).recurring,
+          isFalse,
+        );
+      },
+    );
+
+    test('carries the fines raised against its missed cycles', () {
+      final obligation = MemberObligation.fromJson({
+        'account_code': 'Dco-C-180302',
+        'amount': 500000,
+        'fines': [
+          {'id': 'f1', 'amount': 50000, 'status': 'pending'},
+          {'id': 'f2', 'amount': 50000, 'status': 'waived'},
+        ],
+      });
+      expect(obligation.fines, hasLength(2));
+      expect(obligation.fines.first.collectible, isTrue);
+      expect(obligation.fines.last.collectible, isFalse);
+    });
+  });
+
+  group('MemberFine', () {
+    test('only a pending fine with something left on it is collectible', () {
+      MemberFine fine(String status, int paid) => MemberFine.fromJson({
+            'id': 'f1',
+            'amount': 50000,
+            'amount_paid': paid,
+            'status': status,
+          });
+      expect(fine('pending', 0).collectible, isTrue);
+      expect(fine('pending', 20000).collectible, isTrue);
+      expect(fine('pending', 50000).collectible, isFalse);
+      expect(fine('waived', 0).collectible, isFalse);
+      expect(fine('paid', 50000).collectible, isFalse);
+    });
+  });
+
+  group('CollectionTarget', () {
+    final savings = MemberObligation.fromJson({
+      'account_code': 'Dco-C-180302',
+      'account_name': 'Thrift Savings',
+      'amount': 500000,
+      'recurring': true,
+      'next_due_date': '2026-09-30T00:00:00Z',
+      'fines': [
+        {'id': 'f1', 'amount': 50000, 'status': 'pending'},
+        {'id': 'f2', 'amount': 50000, 'status': 'paid', 'amount_paid': 50000},
+      ],
+    });
+    final shares = MemberObligation.fromJson({
+      'account_code': 'Dco-C-936038',
+      'account_name': 'Share Capital',
+      'amount': 15500000,
+      'amount_paid': 2000000,
+      'recurring': false,
+    });
+    final adhoc = MemberFine.fromJson({
+      'id': 'f3',
+      'amount': 100000,
+      'status': 'pending',
+      'description': 'missed the general meeting',
+    });
+
+    test('puts each fine under what it was raised against', () {
+      final targets = CollectionTarget.spread([savings, shares], [adhoc]);
+      expect(
+        targets.map((t) => t.title).toList(),
+        [
+          'Thrift Savings',
+          'Fine — Thrift Savings',
+          'Share Capital',
+          'Fine — missed the general meeting',
+        ],
+      );
+    });
+
+    test('leaves out a fine the member no longer owes', () {
+      final settled = CollectionTarget.spread([savings], const [])
+          .where((t) => t.isFine)
+          .toList();
+      expect(settled, hasLength(1));
+      expect(settled.single.fineId, 'f1');
+    });
+
+    test('a fine can never collide with an account', () {
+      final targets = CollectionTarget.spread([savings, shares], [adhoc]);
+      expect(targets.map((t) => t.key).toSet(), hasLength(targets.length));
+      expect(targets[1].key, 'fine:f1');
+      expect(targets[1].obligationCode, '');
+      expect(targets[0].key, 'Dco-C-180302');
+      expect(targets[0].fineId, '');
+    });
+
+    test('a one-off is progress towards a target, not a cycle', () {
+      final target = CollectionTarget.obligation(shares);
+      expect(target.recurring, isFalse);
+      expect(target.nextDueDate, isNull);
+      expect(target.amountPaid, 2000000);
+      expect(target.outstanding, 13500000);
+    });
   });
 
   group('PendingCollection', () {
@@ -89,6 +233,74 @@ void main() {
       expect(restored.clientReference, pending.clientReference);
       expect(restored.totalAmount, pending.totalAmount);
       expect(restored.allocations.first.title, 'Monthly Savings');
+    });
+
+    test('a fine on the receipt names the fine and nothing else', () {
+      final withFine = PendingCollection(
+        clientReference: 'K7Q2-000215',
+        cooperativeId: 'Tco-8934',
+        ledgerNumber: 'Tco-8934-001',
+        memberName: 'Ada Obi',
+        allocations: const [
+          CollectionAllocation(
+            obligationCode: 'Bco-C-997724',
+            title: 'Monthly Savings',
+            amount: 200000,
+          ),
+          CollectionAllocation(
+            obligationCode: '',
+            fineId: 'fine-9a1c',
+            title: 'Fine — Monthly Savings',
+            amount: 50000,
+          ),
+        ],
+        note: '',
+        collectedAt: DateTime.utc(2026, 8, 28, 9, 30),
+      );
+      // The obligation line has to stay byte-for-byte what it always was: a
+      // receipt queued by an older build sends exactly this, and the service reads
+      // the absence of target_type as an obligation.
+      expect(withFine.toRequestJson()['allocations'], [
+        {'obligation': 'Bco-C-997724', 'amount': 200000},
+        {'target_type': 'fine', 'fine_id': 'fine-9a1c', 'amount': 50000},
+      ]);
+      expect(withFine.totalAmount, 250000);
+    });
+
+    test('a queued fine line is still a fine after a restart', () {
+      final restored = PendingCollection.fromJson(
+        PendingCollection(
+          clientReference: 'K7Q2-000216',
+          cooperativeId: 'Tco-8934',
+          ledgerNumber: 'Tco-8934-001',
+          memberName: 'Ada Obi',
+          allocations: const [
+            CollectionAllocation(
+              obligationCode: '',
+              fineId: 'fine-9a1c',
+              title: 'Fine — Monthly Savings',
+              amount: 50000,
+            ),
+          ],
+          note: '',
+          collectedAt: DateTime.utc(2026, 8, 28, 9, 30),
+        ).toJson(),
+      );
+      expect(restored.allocations.single.isFine, isTrue);
+      expect(restored.allocations.single.fineId, 'fine-9a1c');
+    });
+
+    test('a receipt written before fines existed is read as an obligation', () {
+      final restored = CollectionAllocation.fromJson({
+        'obligation': 'Bco-C-997724',
+        'title': 'Monthly Savings',
+        'amount': 200000,
+      });
+      expect(restored.isFine, isFalse);
+      expect(restored.toRequestJson(), {
+        'obligation': 'Bco-C-997724',
+        'amount': 200000,
+      });
     });
   });
 
