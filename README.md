@@ -151,7 +151,7 @@ Configure per **environment** (`staging`, `production`):
 | `PUBLIC_RELEASES_REPO` | `communalhq/communal-releases` | No public download link; the APK is not published anywhere |
 | `PLAY_STORE_TRACK` | `internal` | Defaults to `internal` |
 | `PLAY_STORE_RELEASE_STATUS` | `draft` | Defaults to `draft` |
-| `IOS_BUNDLE_ID` | `com.communalhq.communalCollector` | iOS signing is skipped |
+| `IOS_BUNDLE_ID` | `com.communal.collector` | iOS signing is skipped |
 | `IOS_TEAM_ID` | the Apple team id | iOS signing is skipped |
 
 Secrets — **repository level, not environment level**, for the Android four:
