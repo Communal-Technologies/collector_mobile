@@ -415,22 +415,29 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
   Widget _list(List<MemberObligation> obligations) {
     final visible = _visible(obligations);
     if (visible.isEmpty) {
-      return EmptyState(
-        icon: Iconsax.filter,
-        title: _query.isNotEmpty
-            ? 'No account matches "$_query"'
-            : _lens == _Lens.due
-                ? 'Nothing is overdue'
-                : 'Nothing is outstanding',
-        message: 'The member may still pay into any of their accounts.',
-        action: OutlinedButton(
-          onPressed: () => setState(() {
-            _lens = _Lens.all;
-            _query = '';
-            _search.clear();
-          }),
-          child: const Text('Show all accounts'),
-        ),
+      // In a list rather than on its own: the header, the lens bar and the bottom
+      // bar leave this little height on a short screen, and an empty state that
+      // cannot scroll is an overflow.
+      return ListView(
+        children: [
+          EmptyState(
+            icon: Iconsax.filter,
+            title: _query.isNotEmpty
+                ? 'No account matches "$_query"'
+                : _lens == _Lens.due
+                    ? 'Nothing is overdue'
+                    : 'Nothing is outstanding',
+            message: 'The member may still pay into any of their accounts.',
+            action: OutlinedButton(
+              onPressed: () => setState(() {
+                _lens = _Lens.all;
+                _query = '';
+                _search.clear();
+              }),
+              child: const Text('Show all accounts'),
+            ),
+          ),
+        ],
       );
     }
     return ListView.separated(
@@ -574,6 +581,7 @@ class _LensBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           TextField(
             controller: search,
@@ -595,20 +603,22 @@ class _LensBar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          Row(
+          // Wrapped rather than a row: three chips plus a checkmark already come to
+          // more than a narrow phone's width, and a row of them has nowhere to go.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               for (final option in _Lens.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    selected: option == lens,
-                    onSelected: (_) => onLens(option),
-                    label: Text(switch (option) {
-                      _Lens.due => 'Due now',
-                      _Lens.owing => 'Owing',
-                      _Lens.all => 'All',
-                    }),
-                  ),
+                ChoiceChip(
+                  selected: option == lens,
+                  onSelected: (_) => onLens(option),
+                  showCheckmark: false,
+                  label: Text(switch (option) {
+                    _Lens.due => 'Due now',
+                    _Lens.owing => 'Owing',
+                    _Lens.all => 'All',
+                  }),
                 ),
             ],
           ),
@@ -668,31 +678,38 @@ class _ObligationRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Text(
-                          outstanding > 0
-                              ? '${Money.formatWhole(outstanding)} outstanding'
-                              : 'Settled',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: outstanding > 0
-                                ? AppColors.muted
-                                : AppColors.success,
-                          ),
-                        ),
-                        if (obligation.nextDueDate != null) ...[
-                          const SizedBox(width: 6),
-                          Text(
-                            '· ${overdue ? 'due' : 'by'} ${Dates.day(obligation.nextDueDate)}',
+                    // One line rather than a row of two: an account name and a
+                    // five-figure balance already fill a phone's width, and a row
+                    // of unflexed texts has nowhere to go when they do.
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: outstanding > 0
+                                ? '${Money.formatWhole(outstanding)} outstanding'
+                                : 'Settled',
                             style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: overdue ? FontWeight.w700 : FontWeight.w400,
-                              color: overdue ? AppColors.danger : AppColors.muted,
+                              color: outstanding > 0
+                                  ? AppColors.muted
+                                  : AppColors.success,
                             ),
                           ),
+                          if (obligation.nextDueDate != null)
+                            TextSpan(
+                              text:
+                                  '  · ${overdue ? 'due' : 'by'} ${Dates.day(obligation.nextDueDate)}',
+                              style: TextStyle(
+                                fontWeight:
+                                    overdue ? FontWeight.w700 : FontWeight.w400,
+                                color:
+                                    overdue ? AppColors.danger : AppColors.muted,
+                              ),
+                            ),
                         ],
-                      ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5),
                     ),
                   ],
                 ),
