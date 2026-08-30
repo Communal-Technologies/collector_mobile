@@ -321,23 +321,28 @@ class MoneyInputFormatter extends TextInputFormatter {
     if (digits.isEmpty) return newValue.copyWith(text: '');
     final value = int.tryParse(digits);
     if (value == null) return oldValue;
-    final formatted = _group(value);
+    final formatted = groupDigits(value);
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
-
-  String _group(int value) {
-    final digits = value.toString();
-    final buffer = StringBuffer();
-    for (var i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
-      buffer.write(digits[i]);
-    }
-    return buffer.toString();
-  }
 }
+
+String groupDigits(int value) {
+  final digits = value.toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
+    buffer.write(digits[i]);
+  }
+  return buffer.toString();
+}
+
+/// The text a [MoneyField] holds for [minor] kobo, grouped the way the formatter
+/// would have grouped it had the collector typed it.
+String moneyFieldText(int minor) =>
+    minor <= 0 ? '' : groupDigits(minor ~/ Money.minorPerMajor);
 
 /// A whole-naira amount field. Kobo are never typed here: a collector takes notes
 /// and coins, and no cooperative prices an obligation in kobo.
