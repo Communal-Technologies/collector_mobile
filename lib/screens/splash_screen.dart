@@ -6,6 +6,12 @@ import 'package:iconsax/iconsax.dart';
 import '../core/config.dart';
 import '../core/theme.dart';
 
+/// The ground this screen is painted on, and the same value as the launch window's
+/// `launch_ground` in `res/values/colors.xml`. It has to be the same: Android paints that
+/// window before any Dart runs, so a different colour here is a flash on every cold
+/// start — which is exactly what the purple version of this screen did.
+const splashGround = Color(0xFF000000);
+
 /// What the app opens on.
 ///
 /// It stays on screen for as long as the session is being worked out, and it also
@@ -36,11 +42,11 @@ class SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light.copyWith(
-        statusBarColor: AppColors.primary,
-        systemNavigationBarColor: AppColors.primary,
+        statusBarColor: splashGround,
+        systemNavigationBarColor: splashGround,
       ),
       child: Scaffold(
-        backgroundColor: AppColors.primary,
+        backgroundColor: splashGround,
         body: Stack(
           children: [
             const SplashGlows(),
@@ -48,7 +54,7 @@ class SplashScreen extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const SplashLogoCircle(),
+                  const SplashMark(),
                   SizedBox(height: 40.h),
                   Text(
                     AppConfig.appName,
@@ -116,47 +122,38 @@ class SplashScreen extends StatelessWidget {
   }
 }
 
-/// The member app's splash mark, at the member app's numbers: a 200 circle with a
-/// 140 mark inside it, on the same 430-wide design.
+/// The mark, drawn the way the launch window draws it: white, straight onto the black,
+/// with no plate behind it.
+///
+/// It used to be the purple mark inside a 200 white circle, which was right when this
+/// screen was purple and wrong the moment the ground went black — the launch window
+/// Android paints already shows a bare white mark, so the plate appeared out of nowhere
+/// on the first Dart frame. The mark keeps its own size; only the plate is gone.
 ///
 /// Public, like the other sized pieces of this screen, because ScreenUtilInit skips
 /// any widget whose type name begins with an underscore when it re-marks the tree
 /// after the real screen size arrives — a private one keeps whatever it measured on
 /// the first frame, which on this device is nothing at all.
-class SplashLogoCircle extends StatelessWidget {
-  const SplashLogoCircle({super.key});
+class SplashMark extends StatelessWidget {
+  const SplashMark({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 200.w,
-      height: 200.w,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Center(
-        child: Image.asset(
-          'assets/images/icon-02.png',
-          width: 140.w,
-          fit: BoxFit.contain,
-        ),
-      ),
+    return Image.asset(
+      'assets/images/mark_white.png',
+      width: 150.w,
+      fit: BoxFit.contain,
     );
   }
 }
 
 /// The member app's three colour washes behind the mark, at its positions. Its
-/// own version blurs them with a BackdropFilter; that layer took the white circle
-/// and the loader off this device's screen entirely, so the softness comes from the
+/// own version blurs them with a BackdropFilter; that layer took the mark and the
+/// loader off this device's screen entirely, so the softness comes from the
 /// gradient stops instead.
+///
+/// The alphas are a little higher than the member app's because black absorbs a wash
+/// that purple carried.
 class SplashGlows extends StatelessWidget {
   const SplashGlows({super.key});
 
@@ -173,8 +170,8 @@ class SplashGlows extends StatelessWidget {
               right: 10.w,
               child: SplashGlow(
                 size: 200.w,
-                inner: Colors.orange.withValues(alpha: 0.28),
-                outer: Colors.orange.withValues(alpha: 0.14),
+                inner: Colors.orange.withValues(alpha: 0.34),
+                outer: Colors.orange.withValues(alpha: 0.18),
               ),
             ),
             Positioned(
@@ -182,8 +179,8 @@ class SplashGlows extends StatelessWidget {
               left: 0,
               child: SplashGlow(
                 size: 180.w,
-                inner: const Color(0xFFE0B0FF).withValues(alpha: 0.28),
-                outer: const Color(0xFFB09FFF).withValues(alpha: 0.14),
+                inner: const Color(0xFFE0B0FF).withValues(alpha: 0.34),
+                outer: const Color(0xFFB09FFF).withValues(alpha: 0.18),
               ),
             ),
             Positioned(
@@ -191,8 +188,8 @@ class SplashGlows extends StatelessWidget {
               right: 20.w,
               child: SplashGlow(
                 size: 190.w,
-                inner: Colors.cyan.withValues(alpha: 0.28),
-                outer: Colors.blue.withValues(alpha: 0.14),
+                inner: Colors.cyan.withValues(alpha: 0.34),
+                outer: Colors.blue.withValues(alpha: 0.18),
               ),
             ),
           ],
@@ -318,7 +315,7 @@ class SplashBlocked extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: AppColors.primary.withValues(alpha: 0.97),
+      color: splashGround.withValues(alpha: 0.97),
       child: SafeArea(
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 28.w),

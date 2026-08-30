@@ -31,6 +31,23 @@ void main() {
       });
     }
 
+    /// Black, and the same black as `launch_ground` in `res/values/colors.xml`. The two
+    /// have to agree: Android paints that window before any Dart runs, so a purple
+    /// screen here — which is what this was — flashed on every cold start, and it made
+    /// three apps that open identically out of three apps that should not.
+    testWidgets('opens on the launch window\'s black', (tester) async {
+      tester.view
+        ..physicalSize = const Size(430, 932)
+        ..devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_app());
+      await tester.pump();
+
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+      expect(scaffold.backgroundColor, const Color(0xFF000000));
+    });
+
     testWidgets('the loader segment moves', (tester) async {
       // The default test window is wider than it is tall, which no phone is and
       // the portrait lock forbids; the splash is laid out for a phone.

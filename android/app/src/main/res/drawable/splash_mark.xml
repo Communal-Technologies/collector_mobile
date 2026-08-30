@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The mark Android 12+ centres on the launch window: the white mark straight onto
-     the brand purple, the way the member app's launch window carries its mark with no
-     plate behind it. No plate also means no icon mask, and the mask was the only
-     reason a shape appeared here that the Dart splash does not draw.
+<!-- The mark Android 12+ centres on the launch window: the white mark straight onto the
+     black ground, the way the member app's launch window carries its mark with no plate
+     behind it. No plate also means no icon mask, and the mask was the only reason a
+     shape appeared here that the Dart splash does not draw.
      The transparent canvas is the padding. The platform crops to the middle 192 of
      the 288dp canvas and scales that back up, so what lands on screen is a little
      over three times the dp declared here — 55dp measures 174px on a 2x phone,
-     the same as the member app's mark. The member app declares this same size in
-     its own splash_mark.xml, so all three stay equal whatever happens to the
-     launcher icon they used to inherit it from. -->
+     the same as the member app's mark. All three apps declare this same size in their
+     own splash_mark.xml, so they stay equal whatever happens to the launcher icon they
+     used to inherit it from; only the two colours differ. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">

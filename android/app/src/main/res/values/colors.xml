@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The platform's action purple, repeated here because the launch window is
-         painted by Android before any Dart runs. -->
-    <color name="brand_purple">#742CE7</color>
-    <!-- The launch window's ground: the member app's, which declares no splash
-         attributes at all and so gets the platform's black. The collector matches
-         it deliberately rather than by accident — the two open side by side. -->
+    <!-- The launch window's ground, repeated here because Android paints that window
+         before any Dart runs. It is the member app's black — that app declares no
+         splash attributes at all and so gets the platform's — and the collector matches
+         it deliberately rather than by accident, since the two open side by side. The
+         Dart splash is painted the same black, so there is nothing to flash through. -->
     <color name="launch_ground">#000000</color>
 	<color name="ic_launcher_background">#FFFFFF</color>
 </resources>
