@@ -24,6 +24,12 @@ dependencies:
   flutter_screenutil: ^5.9.3
   iconsax: ^0.0.8
 
+  # The store-update check: Play's in-app updates on Android, the App Store
+  # version compared against the bundle's on iOS.
+  in_app_update: ^4.2.5
+  package_info_plus: ^8.0.2
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
