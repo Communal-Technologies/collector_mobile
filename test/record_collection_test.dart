@@ -17,10 +17,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// The receipt screen with no network under it: obligations and standing come back
 /// immediately so a test can drive the buttons a collector actually presses.
 class _StubRepository extends CollectorRepository {
-  _StubRepository(this.obligations)
+  _StubRepository(this.obligations, {this.fines = const [], this.finesFail = false})
       : super(ApiClient(SessionStore(), dio: Dio(BaseOptions(baseUrl: 'http://127.0.0.1'))));
 
   final List<MemberObligation> obligations;
+
+  /// The fines raised against the member directly, which are read separately from
+  /// the ones riding on an obligation.
+  final List<MemberFine> fines;
+  final bool finesFail;
 
   @override
   Future<Cached<MemberObligation>> memberObligations(
@@ -28,6 +33,15 @@ class _StubRepository extends CollectorRepository {
     String ledgerNumber,
   ) async =>
       Cached(obligations);
+
+  @override
+  Future<Cached<MemberFine>> memberFines(
+    String cooperativeId,
+    String ledgerNumber,
+  ) async {
+    if (finesFail) throw ApiException('the fines could not be read');
+    return Cached(fines);
+  }
 
   @override
   Future<CollectorStanding> standing(String cooperativeId) async =>
@@ -54,15 +68,39 @@ class _StubConnectivity extends ConnectivityPlatform {
       const Stream<List<ConnectivityResult>>.empty();
 }
 
-MemberObligation _obligation(String code, String name, int amount) =>
+MemberObligation _obligation(
+  String code,
+  String name,
+  int amount, {
+  bool recurring = true,
+  List<MemberFine> fines = const [],
+}) =>
     MemberObligation(
       id: code,
       accountCode: code,
       accountName: name,
       amount: amount,
       amountPaid: 0,
-      frequency: 'monthly',
-      nextDueDate: DateTime.now().add(const Duration(days: 3)),
+      category: recurring ? '1524' : '1523',
+      recurring: recurring,
+      frequency: recurring ? 'monthly' : '',
+      // A one-off commitment has no cycle, so the server sends it no due date. The
+      // screen reads that absence, so a test that handed one out anyway would be
+      // testing a shape the server never produces.
+      nextDueDate:
+          recurring ? DateTime.now().add(const Duration(days: 3)) : null,
+      fines: fines,
+    );
+
+MemberFine _fine(String id, int amount, {String obligationId = ''}) =>
+    MemberFine(
+      id: id,
+      obligationId: obligationId,
+      amount: amount,
+      amountPaid: 0,
+      status: 'pending',
+      description: 'late payment',
+      dueDate: DateTime.now().subtract(const Duration(days: 2)),
     );
 
 const _grant = CollectorGrant(
@@ -89,9 +127,12 @@ const _member = CollectorMember(
 
 Future<void> _pumpScreen(
   WidgetTester tester,
-  List<MemberObligation> obligations,
-) async {
-  final repository = _StubRepository(obligations);
+  List<MemberObligation> obligations, {
+  List<MemberFine> fines = const [],
+  bool finesFail = false,
+}) async {
+  final repository =
+      _StubRepository(obligations, fines: fines, finesFail: finesFail);
   await tester.pumpWidget(
     RepositoryProvider<CollectorRepository>.value(
       value: repository,
@@ -200,5 +241,63 @@ void main() {
     await tester.tap(find.text('Clear'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a fine is collectable beside the account it was raised against',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpScreen(
+      tester,
+      [
+        _obligation('Dco-C-180302', 'Thrift Savings', 25000000,
+            fines: [_fine('fine-1', 500000, obligationId: 'Dco-C-180302')]),
+        _obligation('Dco-C-936038', 'Share Capital', 15500000,
+            recurring: false),
+      ],
+      fines: [_fine('fine-2', 250000)],
+    );
+
+    // Three rows, not two: the fine on the thrift account and the one raised
+    // against the member directly are each their own line on the receipt.
+    expect(find.textContaining('Fine — Thrift Savings'), findsOneWidget);
+    expect(find.textContaining('Fine — late payment'), findsOneWidget);
+
+    await tester.tap(find.textContaining('Fine — Thrift Savings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Settle'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Add ₦'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // Twice over: the row behind the sheet and the line on the receipt. What
+    // matters is that the fine reached the receipt at all.
+    await tester.tap(find.text('Review'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Fine — Thrift Savings'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('fines that cannot be read do not stop the contributions',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpScreen(
+      tester,
+      [_obligation('Dco-C-180302', 'Thrift Savings', 25000000)],
+      finesFail: true,
+    );
+
+    expect(find.textContaining('could not be'), findsOneWidget);
+    expect(find.text('Thrift Savings'), findsOneWidget);
+    await tester.tap(find.text('Fill owed'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('Record ₦'), findsOneWidget);
   });
 }
