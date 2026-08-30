@@ -136,6 +136,43 @@ void main() {
     });
   });
 
+  group('CollectorMember', () {
+    test('an inactive membership is not collectible, and says which kind', () {
+      final suspended = CollectorMember.fromJson({
+        'ledger_number': 'Dco-8306-13',
+        'deactivated': true,
+        'collectible': false,
+        'standing': 'suspended',
+      });
+      expect(suspended.collectible, isFalse);
+      expect(suspended.standingLabel, 'suspended');
+      expect(suspended.standingNote, contains('reinstate'));
+
+      final lapsed = CollectorMember.fromJson({
+        'ledger_number': 'Dco-8306-14',
+        'deactivated': false,
+        'collectible': false,
+        'standing': 'lapsed',
+      });
+      expect(lapsed.collectible, isFalse);
+      expect(lapsed.standingLabel, 'inactive');
+      expect(lapsed.standingNote, contains('renew'));
+    });
+
+    test('a service that sends no standing at all does not lock out the round', () {
+      final member = CollectorMember.fromJson({'ledger_number': 'Dco-8306-1'});
+      expect(member.collectible, isTrue);
+      expect(member.standing, 'active');
+      expect(
+        CollectorMember.fromJson({
+          'ledger_number': 'Dco-8306-2',
+          'deactivated': true,
+        }).collectible,
+        isFalse,
+      );
+    });
+  });
+
   group('ConnectivityCubit', () {
     late StreamController<List<ConnectivityResult>> transport;
     ConnectivityCubit? cubit;

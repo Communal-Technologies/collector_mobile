@@ -144,6 +144,8 @@ class CollectorMember {
     required this.fullName,
     required this.phone,
     required this.deactivated,
+    required this.collectible,
+    required this.standing,
   });
 
   final String ledgerNumber;
@@ -151,12 +153,46 @@ class CollectorMember {
   final String phone;
   final bool deactivated;
 
+  /// Whether the cooperative's membership for this person is active. False closes
+  /// the door on a receipt: the cooperative pays Communal per active member, so
+  /// collecting against a membership it has stopped paying for would make the
+  /// collector the way round the subscription. The server refuses it too — this only
+  /// saves the collector from being told at the member's door.
+  final bool collectible;
+
+  /// `active`, `suspended` (the cooperative closed it) or `lapsed` (the subscription
+  /// ran out). Two different sentences at the door, and two different things for the
+  /// cooperative to fix.
+  final String standing;
+
+  /// The one word the tile carries.
+  String get standingLabel =>
+      standing == 'suspended' ? 'suspended' : 'inactive';
+
+  /// What the collector says at the door, and who has to fix it. Neither is the
+  /// member's doing, so neither is worded as though it were.
+  String get standingNote => standing == 'suspended'
+      ? 'The cooperative has suspended this account. No collection can be recorded '
+          'against it until they reinstate it.'
+      : 'This membership is not active — the cooperative has to renew it before a '
+          'collection can be recorded against it.';
+
   factory CollectorMember.fromJson(Map<String, dynamic> json) {
+    final standing = _asString(json['standing']);
+    final deactivated = json['deactivated'] == true;
     return CollectorMember(
       ledgerNumber: _asString(json['ledger_number']),
       fullName: _asString(json['full_name']),
       phone: _asString(json['phone']),
-      deactivated: json['deactivated'] == true,
+      deactivated: deactivated,
+      // An older service that does not send the field must not lock the whole round
+      // out; it has its own refusal at the point the receipt is sent.
+      collectible: json.containsKey('collectible')
+          ? json['collectible'] == true
+          : !deactivated,
+      standing: standing.isEmpty
+          ? (deactivated ? 'suspended' : 'active')
+          : standing,
     );
   }
 }

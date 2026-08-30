@@ -189,7 +189,7 @@ class _MembersTabState extends State<MembersTab> {
                     final member = members[result.stale ? index - 1 : index];
                     return _MemberTile(
                       member: member,
-                      onTap: widget.grant.isActive && !member.deactivated
+                      onTap: widget.grant.isActive && member.collectible
                           ? () => _openMember(member)
                           : null,
                     );
@@ -244,15 +244,34 @@ class _MemberTile extends StatelessWidget {
           member.fullName.isEmpty ? member.ledgerNumber : member.fullName,
           style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
-        subtitle: Text(
-          [
-            member.ledgerNumber,
-            if (member.phone.isNotEmpty) member.phone,
-          ].join(' · '),
-          style: const TextStyle(fontSize: 12),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              [
+                member.ledgerNumber,
+                if (member.phone.isNotEmpty) member.phone,
+              ].join(' · '),
+              style: const TextStyle(fontSize: 12),
+            ),
+            if (!member.collectible) ...[
+              const SizedBox(height: 4),
+              Text(
+                member.standingNote,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  height: 1.35,
+                  color: AppColors.danger,
+                ),
+              ),
+            ],
+          ],
         ),
-        trailing: member.deactivated
-            ? const StatusChip('declined', label: 'deactivated')
+        trailing: !member.collectible
+            ? StatusChip(
+                member.standing == 'suspended' ? 'declined' : 'pending',
+                label: member.standingLabel,
+              )
             : onTap == null
                 ? null
                 : const Icon(Icons.chevron_right, color: AppColors.muted),
