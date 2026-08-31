@@ -124,6 +124,32 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     return standing.headroom! - queued;
   }
 
+  /// The most this one can still take, or null where nothing caps it.
+  ///
+  /// The target's own ceiling already counts the receipts the server has seen. A
+  /// receipt written on this phone five minutes ago with no signal is the same cash
+  /// against the same cap, so it comes off here — otherwise the collector writes a
+  /// second receipt against a full account and finds out when there is signal, which
+  /// is after the member has gone.
+  int? _ceiling(CollectionTarget target) {
+    final ceiling = target.ceiling;
+    if (ceiling == null) return null;
+    final queued = context
+        .read<OutboxCubit>()
+        .state
+        .queued
+        .where((i) =>
+            i.cooperativeId == widget.grant.cooperativeId &&
+            i.ledgerNumber == widget.member.ledgerNumber)
+        .expand((i) => i.allocations)
+        .where((a) => target.isFine
+            ? a.fineId == target.fineId
+            : !a.isFine && a.obligationCode == target.obligationCode)
+        .fold<int>(0, (sum, a) => sum + a.amount);
+    final left = ceiling - queued;
+    return left > 0 ? left : 0;
+  }
+
   /// A one-off commitment is never overdue. It has no cycle and the server sends it
   /// no due date, so what would be shown here is a deadline the cooperative never
   /// set — the member is behind on nothing, they are simply not finished yet.
@@ -184,6 +210,7 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
         target: target,
         initial: _allocated[target.key] ?? 0,
         overdue: _isOverdue(target),
+        ceiling: _ceiling(target),
       ),
     );
     if (amount == null) return;
@@ -197,12 +224,19 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     });
   }
 
+  /// Fills in what is owed, held to what each one can still take. A capped account
+  /// with a receipt already standing against it gets the room that is left, not the
+  /// figure that is outstanding — filling in more would put the whole receipt over.
   void _fillOwed(List<CollectionTarget> targets) {
     setState(() {
       for (final target in targets) {
-        if (target.outstanding > 0) {
-          _allocated[target.key] = target.outstanding;
-        }
+        final ceiling = _ceiling(target);
+        final amount = ceiling == null
+            ? target.outstanding
+            : target.outstanding < ceiling
+                ? target.outstanding
+                : ceiling;
+        if (amount > 0) _allocated[target.key] = amount;
       }
       _error = '';
     });
@@ -251,6 +285,17 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     for (final target in targets) {
       final amount = _allocated[target.key] ?? 0;
       if (amount <= 0) continue;
+      // Checked again here, not only in the sheet: another receipt may have been
+      // queued on this phone since the amount was entered, and the room it took is
+      // gone.
+      final ceiling = _ceiling(target);
+      if (ceiling != null && amount > ceiling) {
+        setState(() => _error = ceiling <= 0
+            ? '${target.title} can take nothing more. Remove it from this receipt.'
+            : '${target.title} can only take ${Money.format(ceiling)} more. '
+                'Change what you put against it.');
+        return;
+      }
       allocations.add(CollectionAllocation(
         obligationCode: target.obligationCode,
         fineId: target.fineId,
@@ -459,6 +504,7 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
           target: target,
           allocated: _allocated[target.key] ?? 0,
           overdue: _isOverdue(target),
+          ceiling: _ceiling(target),
           onTap: _blocked ? null : () => _editAmount(target),
         );
       },
@@ -664,12 +710,16 @@ class _TargetRow extends StatelessWidget {
     required this.target,
     required this.allocated,
     required this.overdue,
+    required this.ceiling,
     required this.onTap,
   });
 
   final CollectionTarget target;
   final int allocated;
   final bool overdue;
+
+  /// The most this one can still take, null where nothing caps it.
+  final int? ceiling;
   final VoidCallback? onTap;
 
   @override
@@ -800,10 +850,19 @@ class _TargetRow extends StatelessWidget {
           : 'Settled';
     }
     if (!target.recurring) {
-      return outstanding > 0
-          ? '${Money.formatWhole(target.amountPaid)} of '
-              '${Money.formatWhole(target.amount)} paid'
-          : 'Complete';
+      if (outstanding <= 0) return 'Complete';
+      // What is outstanding and what can still be taken are the same figure until a
+      // receipt is standing against the account unsigned. Where they differ it is the
+      // second one the collector needs, and the reason for it in the same breath.
+      final room = ceiling;
+      if (room != null && room < outstanding) {
+        return room <= 0
+            ? 'Fully receipted — awaiting approval'
+            : '${Money.formatWhole(room)} can be taken · '
+                '${Money.formatWhole(outstanding - room)} awaiting approval';
+      }
+      return '${Money.formatWhole(target.amountPaid)} of '
+          '${Money.formatWhole(target.amount)} paid';
     }
     return outstanding > 0
         ? '${Money.formatWhole(outstanding)} outstanding'
@@ -821,11 +880,16 @@ class _AmountSheet extends StatefulWidget {
     required this.target,
     required this.initial,
     required this.overdue,
+    required this.ceiling,
   });
 
   final CollectionTarget target;
   final int initial;
   final bool overdue;
+
+  /// The most this one can still take, null where nothing caps it. Already net of
+  /// the receipts the server has seen and the ones still on this phone.
+  final int? ceiling;
 
   @override
   State<_AmountSheet> createState() => _AmountSheetState();
@@ -851,10 +915,16 @@ class _AmountSheetState extends State<_AmountSheet> {
     final target = widget.target;
     final outstanding = target.outstanding;
     final entered = moneyFieldMinor(_amount);
-    // A fine is a fixed penalty, not an account that holds a balance, so there is
-    // nowhere for an excess to go. The service refuses it; refusing it here means the
-    // collector is told before the member is given a receipt for it.
-    final excess = target.isFine && entered > outstanding;
+    // A fine is a fixed penalty with nowhere for an excess to go, and a one-off
+    // account is capped by the cooperative's own share figure. The service refuses
+    // either; refusing it here means the collector is told before the member is given
+    // a receipt for it.
+    final ceiling = widget.ceiling;
+    final refusal =
+        ceiling != null && entered > ceiling ? _refusal(target, ceiling) : '';
+    // The most the collector can put here in one tap. On a capped account that is the
+    // room, not what is outstanding: the difference is receipts already written.
+    final settle = ceiling != null && ceiling < outstanding ? ceiling : outstanding;
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -886,13 +956,13 @@ class _AmountSheetState extends State<_AmountSheet> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              if (outstanding > 0)
+              if (settle > 0)
                 ActionChip(
                   label: Text(
                     '${target.isFine ? 'Settle' : target.recurring ? 'Pay all' : 'Pay the rest'} '
-                    '${Money.formatWhole(outstanding)}',
+                    '${Money.formatWhole(settle)}',
                   ),
-                  onPressed: () => _set(outstanding),
+                  onPressed: () => _set(settle),
                 ),
               // The standing charge is one cycle of a recurring account. A one-off
               // has no cycle and its whole target is the wrong figure to offer as a
@@ -912,11 +982,10 @@ class _AmountSheetState extends State<_AmountSheet> {
                 ),
             ],
           ),
-          if (excess) ...[
+          if (refusal.isNotEmpty) ...[
             const SizedBox(height: 12),
             Notice(
-              text: 'A fine can only take the ${Money.format(outstanding)} still '
-                  'standing on it. Put the rest against one of the member\'s accounts.',
+              text: refusal,
               tone: AppColors.danger,
               background: AppColors.dangerSoft,
               icon: Iconsax.danger,
@@ -926,7 +995,7 @@ class _AmountSheetState extends State<_AmountSheet> {
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: excess || (entered <= 0 && widget.initial <= 0)
+              onPressed: refusal.isNotEmpty || (entered <= 0 && widget.initial <= 0)
                   ? null
                   : () => Navigator.of(context).pop(entered),
               child: Text(entered <= 0
@@ -939,6 +1008,32 @@ class _AmountSheetState extends State<_AmountSheet> {
         ],
       ),
     );
+  }
+
+  /// Why the amount will not be taken, in terms of the thing that is holding it.
+  ///
+  /// A collector standing in front of a member reads "this account is full" as the
+  /// cooperative's figure being wrong, so where a receipt of their own is what is
+  /// holding the room, that is what the sentence says.
+  String _refusal(CollectionTarget target, int ceiling) {
+    if (target.isFine) {
+      return 'A fine can only take the ${Money.format(ceiling)} still standing on '
+          'it. Put the rest against one of the member\'s accounts.';
+    }
+    final held = target.outstanding - ceiling;
+    if (held <= 0) {
+      return 'This commitment is ${Money.format(target.amount)} in total and only '
+          '${Money.format(ceiling)} of it is unpaid. Put the rest against another '
+          'account.';
+    }
+    if (ceiling <= 0) {
+      return 'Receipts for the whole of this ${Money.format(target.amount)} '
+          'commitment have already been written and are waiting to be countersigned. '
+          'Put this against another account.';
+    }
+    return 'Only ${Money.format(ceiling)} is left on this commitment — '
+        '${Money.format(held)} of it is on receipts waiting to be countersigned. '
+        'Put the rest against another account.';
   }
 
   /// What stands against this one, in the terms it is actually owed in.
@@ -956,10 +1051,15 @@ class _AmountSheetState extends State<_AmountSheet> {
       return parts.join(' · ');
     }
     if (!target.recurring) {
-      return outstanding > 0
-          ? '${Money.format(target.amountPaid)} of ${Money.format(target.amount)} '
-              'paid — ${Money.format(outstanding)} left to complete it'
-          : 'This commitment is complete';
+      if (outstanding <= 0) return 'This commitment is complete';
+      final ceiling = widget.ceiling;
+      if (ceiling != null && ceiling < outstanding) {
+        return '${Money.format(target.amountPaid)} of ${Money.format(target.amount)} '
+            'paid — ${Money.format(outstanding - ceiling)} more is on receipts '
+            'waiting to be countersigned, leaving ${Money.format(ceiling)} to take';
+      }
+      return '${Money.format(target.amountPaid)} of ${Money.format(target.amount)} '
+          'paid — ${Money.format(outstanding)} left to complete it';
     }
     final parts = [
       outstanding > 0
