@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -41,6 +43,7 @@ class SessionState extends Equatable {
     this.profile,
     this.notice = '',
     this.locked = false,
+    this.idlePrompt = false,
   });
 
   final SessionStatus status;
@@ -61,6 +64,10 @@ class SessionState extends Equatable {
   /// Nothing behind the lock is shown while this is true.
   final bool locked;
 
+  /// The app has been left alone long enough to ask whether anyone is still
+  /// holding the phone. Unanswered, it becomes [locked].
+  final bool idlePrompt;
+
   SessionState copyWith({
     SessionStatus? status,
     CollectorGrant? grant,
@@ -68,6 +75,7 @@ class SessionState extends Equatable {
     CollectorProfile? profile,
     String? notice,
     bool? locked,
+    bool? idlePrompt,
   }) =>
       SessionState(
         status: status ?? this.status,
@@ -76,11 +84,19 @@ class SessionState extends Equatable {
         profile: profile ?? this.profile,
         notice: notice ?? this.notice,
         locked: locked ?? this.locked,
+        idlePrompt: idlePrompt ?? this.idlePrompt,
       );
 
   @override
-  List<Object?> get props =>
-      [status, grant?.collectorId, grants.length, profile?.id, notice, locked];
+  List<Object?> get props => [
+        status,
+        grant?.collectorId,
+        grants.length,
+        profile?.id,
+        notice,
+        locked,
+        idlePrompt,
+      ];
 }
 
 class SessionCubit extends Cubit<SessionState> {
@@ -89,16 +105,45 @@ class SessionCubit extends Cubit<SessionState> {
     required CollectorRepository repository,
     required AuthRepository auth,
     PinLock? lock,
-  })  : _store = store,
+    Duration idleWarning = const Duration(minutes: 3),
+    Duration idleTimeout = const Duration(minutes: 5),
+    Duration idleTick = const Duration(seconds: 10),
+    Duration unlockGrace = const Duration(seconds: 30),
+    DateTime Function()? clock,
+  })  : _now = clock ?? DateTime.now,
+        _store = store,
         _repository = repository,
         _auth = auth,
         _lock = lock ?? PinLock(),
+        _idleWarning = idleWarning,
+        _idleTimeout = idleTimeout,
+        _idleTick = idleTick,
+        _unlockGrace = unlockGrace,
         super(const SessionState());
 
   final SessionStore _store;
   final CollectorRepository _repository;
   final AuthRepository _auth;
   final PinLock _lock;
+
+  /// How long the app may sit untouched before it asks, and then before it locks.
+  /// The member app's figures, because it is the same PIN on the same account.
+  final Duration _idleWarning;
+  final Duration _idleTimeout;
+  final Duration _idleTick;
+
+  /// A moment's quiet right after an unlock is not idleness — the collector has
+  /// just typed six digits and is reading the screen.
+  final Duration _unlockGrace;
+
+  /// Wall time, injectable so a test can move it without waiting for it. A test
+  /// clock alone is not enough — the ticks are timers — but a timer that fires and
+  /// then reads a clock that has not moved would never see idleness.
+  final DateTime Function() _now;
+
+  Timer? _idleWatch;
+  DateTime? _lastActivity;
+  DateTime? _lastUnlock;
 
   /// Decides what the app opens on. A stored token with a stored grant is enough to
   /// come back to, but not to walk straight in on: the PIN is asked for on every
@@ -147,14 +192,63 @@ class SessionCubit extends Cubit<SessionState> {
       grants: [result.grant],
       profile: result.profile,
     ));
+    _openedForUse();
     refreshGrants();
   }
 
-  /// Puts the lock back on. Called when the app is launched and when it comes back
-  /// from a long spell in the background.
+  /// Puts the lock back on: the app was launched, it was left, or it was sat in
+  /// front of untouched.
   void lockNow() {
+    if (state.status != SessionStatus.signedIn) return;
+    _stopIdleWatch();
+    if (state.locked) return;
+    emit(state.copyWith(locked: true, idlePrompt: false));
+  }
+
+  /// A tap. The idle clock measures from the last one of these.
+  void recordActivity() {
     if (state.status != SessionStatus.signedIn || state.locked) return;
-    emit(state.copyWith(locked: true));
+    _lastActivity = _now();
+    if (state.idlePrompt) emit(state.copyWith(idlePrompt: false));
+  }
+
+  /// Answers the idle prompt with "still here".
+  void dismissIdlePrompt() => recordActivity();
+
+  /// Whether the app has been left alone long enough to ask, and then to lock.
+  ///
+  /// Public because the watchdog's own tick is not the interesting part; this is,
+  /// and a test drives it directly.
+  void checkIdle() {
+    if (state.status != SessionStatus.signedIn || state.locked) return;
+    final unlockedAt = _lastUnlock;
+    if (unlockedAt != null && _now().difference(unlockedAt) < _unlockGrace) {
+      return;
+    }
+    final last = _lastActivity;
+    if (last == null) {
+      _lastActivity = _now();
+      return;
+    }
+    final idle = _now().difference(last);
+    if (idle >= _idleTimeout) {
+      lockNow();
+    } else if (idle >= _idleWarning && !state.idlePrompt) {
+      emit(state.copyWith(idlePrompt: true));
+    }
+  }
+
+  void _openedForUse() {
+    final now = _now();
+    _lastUnlock = now;
+    _lastActivity = now;
+    _idleWatch?.cancel();
+    _idleWatch = Timer.periodic(_idleTick, (_) => checkIdle());
+  }
+
+  void _stopIdleWatch() {
+    _idleWatch?.cancel();
+    _idleWatch = null;
   }
 
   /// Checks the PIN and, if it is right, opens the round.
@@ -176,7 +270,8 @@ class SessionCubit extends Cubit<SessionState> {
         );
       }
       await _lock.remember(pin);
-      emit(state.copyWith(locked: false));
+      emit(state.copyWith(locked: false, idlePrompt: false));
+      _openedForUse();
       refreshGrants();
       return const UnlockOutcome(UnlockResult.unlocked);
     } on ApiException catch (e) {
@@ -200,7 +295,8 @@ class SessionCubit extends Cubit<SessionState> {
     }
     if (await _lock.matches(pin)) {
       await _lock.clearFailures();
-      emit(state.copyWith(locked: false));
+      emit(state.copyWith(locked: false, idlePrompt: false));
+      _openedForUse();
       return const UnlockOutcome(UnlockResult.unlocked);
     }
     final used = await _lock.recordFailure();
@@ -258,8 +354,15 @@ class SessionCubit extends Cubit<SessionState> {
   }
 
   Future<void> signOut({String notice = ''}) async {
+    _stopIdleWatch();
     await _store.clear();
     await _lock.forget();
     emit(SessionState(status: SessionStatus.signedOut, notice: notice));
+  }
+
+  @override
+  Future<void> close() {
+    _stopIdleWatch();
+    return super.close();
   }
 }

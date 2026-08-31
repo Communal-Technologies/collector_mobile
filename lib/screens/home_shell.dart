@@ -25,35 +25,16 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
+/// This shell has no lifecycle observer of its own: leaving the app locks it, so by
+/// the time the phone comes back this widget has been replaced by the lock screen
+/// and rebuilt from nothing afterwards. The resume work — flushing the outbox,
+/// re-reading the grants — belongs to the app entry, which outlives the lock.
+class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
 
   /// Bumped to make the standing header and the visible tab re-read. Every screen
   /// here is a view of the same few numbers, so they refresh together.
   int _revision = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // A collector puts the phone in their pocket between doors. Coming back is
-      // the most likely moment for signal to have returned.
-      context.read<OutboxCubit>().flush();
-      context.read<SessionCubit>().refreshGrants();
-      _refresh();
-    }
-  }
 
   void _refresh() {
     if (mounted) setState(() => _revision++);

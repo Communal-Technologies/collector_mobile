@@ -114,6 +114,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(session.state.locked, isFalse);
+    // An open round is being watched for idleness, and that watch is a timer the
+    // framework will not let the test finish holding. Locking puts it down.
+    session.lockNow();
   });
 
   testWidgets('offline, a wrong PIN says how many tries are left', (

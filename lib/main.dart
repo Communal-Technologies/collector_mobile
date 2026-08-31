@@ -20,6 +20,7 @@ import 'screens/splash_screen.dart';
 import 'state/connectivity_cubit.dart';
 import 'state/outbox_cubit.dart';
 import 'state/session_cubit.dart';
+import 'widgets/session_guard.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -107,7 +108,16 @@ class _CollectorAppState extends State<CollectorApp> {
             title: AppConfig.appName,
             debugShowCheckedModeBanner: false,
             theme: buildAppTheme(),
-            home: const _Entry(),
+            // Above the navigator, so a touch inside a dialog or a bottom sheet
+            // counts as somebody being there too. `Listener` rather than a
+            // gesture: a pointer-down is reported whatever wins the arena, so a
+            // tap on a button is not lost to the button.
+            builder: (context, child) => Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (_) => _session.recordActivity(),
+              child: child ?? const SizedBox.shrink(),
+            ),
+            home: const SessionGuard(child: _Entry()),
           ),
         ),
       ),
@@ -130,24 +140,13 @@ class _Entry extends StatefulWidget {
   State<_Entry> createState() => _EntryState();
 }
 
-class _EntryState extends State<_Entry> with WidgetsBindingObserver {
+class _EntryState extends State<_Entry> {
   /// The splash is held for a moment even when the session resolves instantly, so
   /// the app opens rather than flickering through a purple frame.
   static const _brandingHold = Duration(milliseconds: 1100);
 
-  /// How long the app may sit in the background before the PIN is asked for again.
-  ///
-  /// A launch always asks — that is [SessionCubit.bootstrap]. This is the other
-  /// half: closing the app is what locks it, and the phone cannot tell "closed" from
-  /// "the collector opened the camera to photograph a receipt, or answered the SMS
-  /// with the code in it". Locking on every glance elsewhere would make the app
-  /// unusable on a round; never locking would leave a round's takings open on a
-  /// phone in someone's pocket.
-  static const _backgroundGrace = Duration(minutes: 3);
-
   bool _held = true;
   Timer? _holdTimer;
-  DateTime? _leftAt;
 
   /// Once the sign-in form has been shown, losing signal must not snatch it away —
   /// a collector halfway through typing a phone number would lose it, and the form
@@ -157,7 +156,6 @@ class _EntryState extends State<_Entry> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _holdTimer = Timer(_brandingHold, () {
       if (mounted) setState(() => _held = false);
     });
@@ -165,30 +163,8 @@ class _EntryState extends State<_Entry> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _holdTimer?.cancel();
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.paused:
-      case AppLifecycleState.hidden:
-      case AppLifecycleState.detached:
-        // Not `inactive`: that also fires for the notification shade and for a
-        // permission dialog, neither of which is leaving the app.
-        _leftAt ??= DateTime.now();
-      case AppLifecycleState.resumed:
-        final left = _leftAt;
-        _leftAt = null;
-        if (left != null &&
-            DateTime.now().difference(left) >= _backgroundGrace) {
-          context.read<SessionCubit>().lockNow();
-        }
-      case AppLifecycleState.inactive:
-        break;
-    }
   }
 
   @override

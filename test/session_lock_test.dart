@@ -22,15 +22,39 @@ void main() {
     lock = PinLock(secure: MemorySecureStorage());
   });
 
-  SessionCubit build(AuthRepository auth) => SessionCubit(
-    store: store,
-    repository: FakeCollectorRepo(),
-    auth: auth,
-    lock: lock,
-  );
+  SessionCubit build(
+    AuthRepository auth, {
+    Duration idleWarning = const Duration(minutes: 3),
+    Duration idleTimeout = const Duration(minutes: 5),
+    Duration idleTick = const Duration(seconds: 10),
+    Duration unlockGrace = const Duration(seconds: 30),
+  }) =>
+      SessionCubit(
+        store: store,
+        repository: FakeCollectorRepo(),
+        auth: auth,
+        lock: lock,
+        idleWarning: idleWarning,
+        idleTimeout: idleTimeout,
+        idleTick: idleTick,
+        unlockGrace: unlockGrace,
+      );
 
-  Future<SessionCubit> signedIn(AuthRepository auth, {String pin = ''}) async {
-    final cubit = build(auth);
+  Future<SessionCubit> signedIn(
+    AuthRepository auth, {
+    String pin = '',
+    Duration idleWarning = const Duration(minutes: 3),
+    Duration idleTimeout = const Duration(minutes: 5),
+    Duration idleTick = const Duration(seconds: 10),
+    Duration unlockGrace = const Duration(seconds: 30),
+  }) async {
+    final cubit = build(
+      auth,
+      idleWarning: idleWarning,
+      idleTimeout: idleTimeout,
+      idleTick: idleTick,
+      unlockGrace: unlockGrace,
+    );
     await cubit.completeLogin(
       LoginResult(
         token: 'access',
@@ -146,5 +170,101 @@ void main() {
     // phone cannot be unlocked with the last one's PIN.
     expect(await lock.isSet, isFalse);
     await cubit.close();
+  });
+
+  test('sitting untouched asks first, and then locks', () async {
+    final cubit = await signedIn(
+      FakeAuth(),
+      pin: '123456',
+      idleWarning: const Duration(milliseconds: 100),
+      idleTimeout: const Duration(milliseconds: 300),
+      idleTick: const Duration(milliseconds: 10),
+      unlockGrace: Duration.zero,
+    );
+    expect(cubit.state.locked, isFalse);
+
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    expect(cubit.state.idlePrompt, isTrue);
+    expect(cubit.state.locked, isFalse);
+
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    expect(cubit.state.locked, isTrue);
+    expect(cubit.state.idlePrompt, isFalse);
+    await cubit.close();
+  });
+
+  test('a touch puts the idle clock back to nothing', () async {
+    final cubit = await signedIn(
+      FakeAuth(),
+      pin: '123456',
+      idleWarning: const Duration(milliseconds: 150),
+      idleTimeout: const Duration(seconds: 30),
+      idleTick: const Duration(milliseconds: 10),
+      unlockGrace: Duration.zero,
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    cubit.recordActivity();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(cubit.state.idlePrompt, isFalse);
+
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(cubit.state.idlePrompt, isTrue);
+    await cubit.close();
+  });
+
+  test('the moment after an unlock is not idleness', () async {
+    final cubit = await signedIn(
+      FakeAuth(),
+      pin: '123456',
+      idleWarning: const Duration(milliseconds: 20),
+      idleTimeout: const Duration(milliseconds: 40),
+      idleTick: const Duration(milliseconds: 10),
+      unlockGrace: const Duration(milliseconds: 250),
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(cubit.state.locked, isFalse);
+    expect(cubit.state.idlePrompt, isFalse);
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(cubit.state.locked, isTrue);
+    await cubit.close();
+  });
+
+  test('locking stops the idle watch, so it cannot fire behind the lock', () async {
+    final cubit = await signedIn(
+      FakeAuth(),
+      pin: '123456',
+      idleWarning: const Duration(milliseconds: 20),
+      idleTimeout: const Duration(milliseconds: 40),
+      idleTick: const Duration(milliseconds: 10),
+      unlockGrace: Duration.zero,
+    );
+    cubit.lockNow();
+    expect(cubit.state.locked, isTrue);
+
+    var emissions = 0;
+    final sub = cubit.stream.listen((_) => emissions++);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(emissions, 0);
+    expect(cubit.state.idlePrompt, isFalse);
+    await sub.cancel();
+    await cubit.close();
+  });
+
+  test('the idle watch does not outlive the cubit', () async {
+    final cubit = await signedIn(
+      FakeAuth(),
+      pin: '123456',
+      idleWarning: const Duration(milliseconds: 20),
+      idleTimeout: const Duration(milliseconds: 40),
+      idleTick: const Duration(milliseconds: 10),
+      unlockGrace: Duration.zero,
+    );
+    await cubit.close();
+    // A tick after close would emit on a closed cubit and throw inside the timer.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(cubit.state.locked, isFalse);
   });
 }
