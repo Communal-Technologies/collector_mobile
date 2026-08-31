@@ -73,6 +73,7 @@ MemberObligation _obligation(
   String name,
   int amount, {
   bool recurring = true,
+  int pendingAmount = 0,
   List<MemberFine> fines = const [],
 }) =>
     MemberObligation(
@@ -89,6 +90,7 @@ MemberObligation _obligation(
       // testing a shape the server never produces.
       nextDueDate:
           recurring ? DateTime.now().add(const Duration(days: 3)) : null,
+      pendingAmount: pendingAmount,
       fines: fines,
     );
 
@@ -347,6 +349,79 @@ void main() {
     expect(find.textContaining('Fine — late payment'), findsOneWidget);
     expect(find.textContaining('Equity'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a receipt awaiting approval holds the room on a capped account',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    // ₦155,000 of share capital with ₦100,000 of it already on a receipt nobody has
+    // countersigned. amount_paid does not move until one is posted, so the pending
+    // figure is the only thing standing between the ₦155,000 outstanding and the
+    // ₦55,000 that can actually be taken.
+    await _pumpScreen(tester, [
+      _obligation('Dco-C-936038', 'Share Capital', 15500000,
+          recurring: false, pendingAmount: 10000000),
+    ]);
+
+    expect(find.textContaining('₦55,000 can be taken'), findsOneWidget);
+    expect(find.textContaining('₦100,000 awaiting approval'), findsOneWidget);
+
+    await tester.tap(find.text('Share Capital'));
+    await tester.pumpAndSettle();
+
+    // The one-tap amount is the room, not what is outstanding — offering the
+    // outstanding figure would fill in a receipt the service is certain to refuse.
+    expect(find.textContaining('waiting to be countersigned'), findsOneWidget);
+    expect(find.textContaining('Pay the rest ₦55,000'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, '60000');
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Only ₦55,000.00 is left'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Add ₦60,000.00'),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('a capped account already fully receipted takes nothing more',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1612);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpScreen(tester, [
+      _obligation('Dco-C-936038', 'Share Capital', 15500000,
+          recurring: false, pendingAmount: 15500000),
+    ]);
+
+    expect(find.textContaining('Fully receipted'), findsOneWidget);
+
+    await tester.tap(find.text('Share Capital'));
+    await tester.pumpAndSettle();
+
+    // Nothing to fill in, so nothing is offered.
+    expect(find.textContaining('Pay the rest'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).last, '1000');
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('have already been written'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Add ₦1,000.00'),
+          )
+          .onPressed,
+      isNull,
+    );
   });
 
   testWidgets('more than is standing on a fine cannot be recorded',
