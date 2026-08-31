@@ -209,6 +209,7 @@ class MemberObligation {
     required this.recurring,
     required this.frequency,
     required this.nextDueDate,
+    required this.pendingAmount,
     required this.fines,
   });
 
@@ -217,6 +218,12 @@ class MemberObligation {
   final String accountName;
   final int amount;
   final int amountPaid;
+
+  /// What receipts already written are holding against this account and nobody has
+  /// countersigned yet. [amountPaid] does not move until one is posted, so on a
+  /// capped account it says there is room a receipt in the collector's own bag has
+  /// already taken.
+  final int pendingAmount;
 
   /// The cooperative's chart-of-accounts type: equity, patronage or custom.
   final String category;
@@ -257,6 +264,10 @@ class MemberObligation {
           : json['next_due_date'] != null,
       frequency: _asString(json['frequency']),
       nextDueDate: Dates.tryParse(json['next_due_date']),
+      // Absent on a server that predates the figure. Zero is the honest reading of
+      // that: it leaves the ceiling where it used to be rather than inventing a
+      // claim, and the recorder still refuses the receipt one screen later.
+      pendingAmount: _asInt(json['pending_amount']),
       fines: rawFines
           .whereType<Map<String, dynamic>>()
           .map(MemberFine.fromJson)
@@ -328,6 +339,7 @@ class CollectionTarget {
     required this.amountPaid,
     required this.recurring,
     required this.nextDueDate,
+    this.pendingAmount = 0,
   });
 
   /// Unique within one receipt: an account code, or the fine's id namespaced so a
@@ -344,10 +356,33 @@ class CollectionTarget {
   final bool recurring;
   final DateTime? nextDueDate;
 
+  /// What receipts already written are holding here, unsettled. Only ever non-zero
+  /// on a capped account, where it is part of the ceiling.
+  final int pendingAmount;
+
   bool get isFine => fineId.isNotEmpty;
 
   int get outstanding {
     final left = amount - amountPaid;
+    return left > 0 ? left : 0;
+  }
+
+  /// Whether there is a figure this one cannot be taken past.
+  ///
+  /// A fine is a fixed penalty with nowhere for an excess to go. A one-off account is
+  /// the member's share capital — total shares × cost per share — and is complete
+  /// when it is met, so the cooperative's own rules cap it. A recurring account has
+  /// no ceiling: paying next month's contribution early is a thing collectors do.
+  bool get capped => isFine || (!recurring && amount > 0);
+
+  /// The most this one can still take, or null where nothing caps it.
+  ///
+  /// Receipts awaiting a countersignature are subtracted because they are cash the
+  /// member has already handed over: the room they hold is gone whether or not it
+  /// has reached [amountPaid] yet.
+  int? get ceiling {
+    if (!capped) return null;
+    final left = amount - amountPaid - pendingAmount;
     return left > 0 ? left : 0;
   }
 
@@ -361,6 +396,7 @@ class CollectionTarget {
       amountPaid: obligation.amountPaid,
       recurring: obligation.recurring,
       nextDueDate: obligation.nextDueDate,
+      pendingAmount: obligation.pendingAmount,
     );
   }
 
