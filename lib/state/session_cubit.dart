@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../core/money.dart';
 import '../data/api_client.dart';
 import '../data/models.dart';
 import '../data/pin_lock.dart';
@@ -351,6 +352,24 @@ class SessionCubit extends Cubit<SessionState> {
   Future<void> switchGrant(CollectorGrant grant) async {
     await _store.saveActiveGrant(grant);
     emit(state.copyWith(grant: grant));
+  }
+
+  /// Keeps the ambient currency on the grant the app is acting under.
+  ///
+  /// Every figure here is the cooperative's money, and almost all of them are
+  /// written where the session is not in scope — a receipt line, a float card, a
+  /// commission label. Setting it on the one path every state change passes
+  /// through is what makes switching cooperatives change the symbol on the
+  /// figures, instead of leaving the previous one's on them.
+  @override
+  void emit(SessionState state) {
+    final grant = state.status == SessionStatus.signedIn ? state.grant : null;
+    if (grant == null) {
+      activeCurrency.reset();
+    } else {
+      activeCurrency.set(grant.currencyDisplay);
+    }
+    super.emit(state);
   }
 
   Future<void> signOut({String notice = ''}) async {
