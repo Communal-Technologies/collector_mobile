@@ -16,6 +16,25 @@ void main() {
       expect(Money.formatWhole(123456), '₦1,234.56');
     });
 
+    test('writes the symbol on the side the cooperative chose', () {
+      const shillings = CurrencyDisplay(
+        code: 'KES',
+        symbol: 'KSh',
+        position: CurrencySymbolPosition.right,
+      );
+      expect(Money.format(123456, display: shillings), '1,234.56 KSh');
+      expect(Money.formatWhole(123400, display: shillings), '1,234 KSh');
+
+      addTearDown(activeCurrency.reset);
+      activeCurrency.set(shillings);
+      expect(Money.format(123456), '1,234.56 KSh');
+    });
+
+    test('falls back to the code when a grant named no symbol', () {
+      const display = CurrencyDisplay(code: 'ZZZ', symbol: '  ');
+      expect(display.adorn('1,000'), 'ZZZ 1,000');
+    });
+
     test('reads a grouped field back into kobo', () {
       expect(Money.parseToMinor('1,234'), 123400);
       expect(Money.parseToMinor('₦ 500'), 50000);
@@ -329,6 +348,23 @@ void main() {
       expect(
         CollectorGrant.fromJson(const {}).commissionLabel,
         'No commission',
+      );
+    });
+
+    test('carries the cooperative currency onto its own figures', () {
+      final grant = CollectorGrant.fromJson({
+        'commission_type': 'flat',
+        'commission_value': 50000,
+        'currency': 'kes',
+        'currency_symbol': 'KSh',
+        'currency_symbol_position': 'RIGHT',
+      });
+      expect(grant.currency, 'KES');
+      expect(grant.currencyDisplay.position, CurrencySymbolPosition.right);
+      expect(grant.commissionLabel, '500.00 KSh per collection');
+      expect(
+        CollectorGrant.fromJson(grant.toJson()).commissionLabel,
+        '500.00 KSh per collection',
       );
     });
 
