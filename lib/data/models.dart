@@ -29,6 +29,9 @@ class CollectorGrant {
     required this.commissionValue,
     required this.cashLimitMinor,
     required this.status,
+    this.currency = 'NGN',
+    this.currencySymbol = '',
+    this.currencySymbolPosition = 'left',
   });
 
   final String collectorId;
@@ -42,8 +45,22 @@ class CollectorGrant {
   final int? cashLimitMinor;
   final String status;
 
+  /// How this cooperative writes its money, off its own settings. Carried on the
+  /// grant because the person may collect for another one that chose differently.
+  final String currency;
+  final String currencySymbol;
+  final String currencySymbolPosition;
+
   bool get isActive => status == 'active';
   bool get postsOnCollection => settlementMode == 'on_collection';
+
+  /// The symbol, the side it sits on and the code behind it, ready to write a
+  /// figure with.
+  CurrencyDisplay get currencyDisplay => CurrencyDisplay(
+        code: currency.trim().isEmpty ? 'NGN' : currency.trim().toUpperCase(),
+        symbol: currencySymbol,
+        position: currencySymbolPositionFrom(currencySymbolPosition),
+      );
 
   /// What the cooperative pays this person, in words. Percentage is basis points
   /// and flat is kobo per collection, so neither is shown raw.
@@ -56,7 +73,9 @@ class CollectorGrant {
             : percent.toStringAsFixed(2);
         return '$text% of what you collect';
       case 'flat':
-        return '${Money.format(commissionValue)} per collection';
+        // This grant's own currency, not the acting one: the sign-in screen
+        // lists every cooperative the person collects for at once.
+        return '${Money.format(commissionValue, display: currencyDisplay)} per collection';
       default:
         return 'No commission';
     }
@@ -76,6 +95,15 @@ class CollectorGrant {
       commissionValue: _asInt(json['commission_value']),
       cashLimitMinor: _asNullableInt(json['cash_limit_minor']),
       status: _asString(json['status']),
+      currency: _asString(json['currency']).trim().isEmpty
+          ? 'NGN'
+          : _asString(json['currency']).trim().toUpperCase(),
+      currencySymbol: _asString(json['currency_symbol']).trim(),
+      currencySymbolPosition:
+          _asString(json['currency_symbol_position']).trim().toLowerCase() ==
+                  'right'
+              ? 'right'
+              : 'left',
     );
   }
 
@@ -90,6 +118,9 @@ class CollectorGrant {
         'commission_value': commissionValue,
         'cash_limit_minor': cashLimitMinor,
         'status': status,
+        'currency': currency,
+        'currency_symbol': currencySymbol,
+        'currency_symbol_position': currencySymbolPosition,
       };
 }
 
