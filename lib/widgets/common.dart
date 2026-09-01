@@ -345,8 +345,9 @@ String groupDigits(int value) {
 String moneyFieldText(int minor) =>
     minor <= 0 ? '' : groupDigits(minor ~/ Money.minorPerMajor);
 
-/// A whole-naira amount field. Kobo are never typed here: a collector takes notes
-/// and coins, and no cooperative prices an obligation in kobo.
+/// A whole-unit amount field, adorned with the acting cooperative's symbol on the
+/// side it chose. Minor units are never typed here: a collector takes notes and
+/// coins, and no cooperative prices an obligation in kobo.
 class MoneyField extends StatelessWidget {
   const MoneyField({
     super.key,
@@ -365,6 +366,8 @@ class MoneyField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final display = activeCurrency.display;
+    final onLeft = display.position == CurrencySymbolPosition.left;
     return TextField(
       controller: controller,
       enabled: enabled,
@@ -374,7 +377,8 @@ class MoneyField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixText: '₦ ',
+        prefixText: onLeft ? '${display.printableSymbol} ' : null,
+        suffixText: onLeft ? null : ' ${display.printableSymbol}',
       ),
     );
   }
