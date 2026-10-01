@@ -454,15 +454,23 @@ jobs:
           releaseFiles: communal-collector.aab
           track: ${{ vars.PLAY_STORE_TRACK || 'internal' }}
           status: ${{ vars.PLAY_STORE_RELEASE_STATUS || 'draft' }}
-          # Play refuses to send an edit for review over the API while the listing
-          # has something a person must submit — an open policy declaration, for
-          # one — and answers "Changes cannot be sent for review automatically",
-          # after the AAB has already uploaded. Committing the edit without the
-          # review request lands the build on the track; it is then sent for
-          # review from the Play Console, which is where the declaration is
-          # answered anyway. A newly registered package always has one open, so
-          # without this the first production run cannot succeed.
-          changesNotSentForReview: true
+          # Whether Play will accept "commit this edit without sending it for
+          # review" depends on the state of the listing, and it refuses in both
+          # directions — always after the AAB has already uploaded.
+          #
+          # An app that is already live with something a person must submit (an
+          # open policy declaration, say) answers "Changes cannot be sent for
+          # review automatically" unless this is set. An app that has never been
+          # published has no such choice to defer — its first edit is submitted
+          # when committed — and answers "Changes are sent for review
+          # automatically. The query parameter changesNotSentForReview must not
+          # be set" when it is.
+          #
+          # So it cannot be hardcoded for the fleet: the member app needs it
+          # true, a newly registered package needs it absent, and the same
+          # package flips from one to the other the day it is first published.
+          # Leave PLAY_CHANGES_NOT_SENT_FOR_REVIEW unset until this app is live.
+          changesNotSentForReview: ${{ vars.PLAY_CHANGES_NOT_SENT_FOR_REVIEW == 'true' }}
 
       # This repo holds source, not binaries — every artifact lives on the public
       # mirror. Production still records the released version here as a commit +
