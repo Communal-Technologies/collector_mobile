@@ -523,6 +523,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   ios:
+    # iOS cannot be signed until there is an Apple Developer account, and a
+    # missing credential must never fail a release. Every signing check below
+    # warns and skips; this is the backstop for anything else on the macOS
+    # runner — a pod break, a toolchain change — so Android still ships.
+    continue-on-error: true
     # Runs on both branches. macOS minutes cost 10x, but an unsigned staging
     # build is the only iOS feedback available without a Mac, and a Flutter/pod
     # break that only surfaces on iOS is otherwise invisible until release day.
@@ -697,14 +702,14 @@ jobs:
             --build-number="${{ steps.meta.outputs.build_number }}"
 
       - name: Import code-signing certificate
-        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.IOS_CERT_BASE64 }}
           p12-password: ${{ secrets.IOS_CERT_PASSWORD }}
 
       - name: Install provisioning profile
-        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         id: profile
         run: |
           set -euo pipefail
@@ -723,8 +728,8 @@ jobs:
           PROFILE_APP_ID=$(security cms -D -i "$PROFILE_PATH" \
             | /usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /dev/stdin 2>/dev/null || true)
           if [[ "$PROFILE_APP_ID" != *".${{ vars.IOS_BUNDLE_ID }}" ]]; then
-            echo "::error::The provisioning profile is for '${PROFILE_APP_ID:-unknown}', not '${{ vars.IOS_BUNDLE_ID }}'. Upload the collector app's App Store distribution profile to IOS_PROVISIONING_PROFILE_BASE64."
-            exit 1
+            echo "::warning::The provisioning profile is for '${PROFILE_APP_ID:-unknown}', not '${{ vars.IOS_BUNDLE_ID }}'. Upload the collector app's App Store distribution profile to IOS_PROVISIONING_PROFILE_BASE64."
+            echo "SIGNING_OK=false" >> "$GITHUB_ENV"
           fi
 
       # The archive has to be signed for distribution, not only the export.
@@ -733,7 +738,7 @@ jobs:
       # not in this keychain and fail before ExportOptions.plist is ever read. The
       # Runner target's Release xcconfig is the level that overrides it.
       - name: Pin manual distribution signing for the archive
-        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         # Through env for the same reason the credential check is: these are
         # expanded inside a heredoc, and a value carrying a quote or a $ would be
         # interpreted by the shell rather than written to the file.
@@ -748,9 +753,10 @@ jobs:
           IDENTITY=$(security find-identity -v -p codesigning \
             | sed -nE 's/.*"((Apple|iPhone) Distribution:[^"]*)".*/\1/p' | head -1)
           if [[ -z "$IDENTITY" ]]; then
-            echo "::error::No distribution identity in the keychain — IOS_CERT_BASE64 is most likely a development certificate."
+            echo "::warning::No distribution identity in the keychain — IOS_CERT_BASE64 is most likely a development certificate."
             security find-identity -v -p codesigning || true
-            exit 1
+            echo "SIGNING_OK=false" >> "$GITHUB_ENV"
+            exit 0
           fi
           echo "Signing as: $IDENTITY"
           cat > ios/Flutter/Signing.xcconfig <<EOF
@@ -762,7 +768,7 @@ jobs:
           EOF
 
       - name: Generate ExportOptions.plist
-        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         env:
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
           BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
@@ -791,7 +797,7 @@ jobs:
           EOF
 
       - name: Build IPA
-        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true'
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         run: |
           flutter build ipa --release \
             --export-options-plist=ios/ExportOptions.plist \
@@ -800,7 +806,7 @@ jobs:
             --build-number="${{ steps.meta.outputs.build_number }}"
 
       - name: Upload to TestFlight
-        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && steps.ios_check.outputs.upload_available == 'true'
+        if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && steps.ios_check.outputs.upload_available == 'true' && env.SIGNING_OK != 'false'
         uses: apple-actions/upload-testflight-build@v1
         with:
           app-path: build/ios/ipa/Runner.ipa
