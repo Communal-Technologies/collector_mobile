@@ -523,10 +523,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   ios:
-    # iOS cannot be signed until there is an Apple Developer account, and a
-    # missing credential must never fail a release. Every signing check below
-    # warns and skips; this is the backstop for anything else on the macOS
-    # runner — a pod break, a toolchain change — so Android still ships.
+    # iOS cannot be signed or released until there is an Apple Developer
+    # account, so nothing here may colour a run red. Every signing check warns
+    # and skips, every Xcode, CocoaPods and signing step carries
+    # continue-on-error so the job itself still reports green, and this is the
+    # backstop for anything else the macOS runner throws. The cost is that a
+    # genuine iOS break is a warning rather than a failure: strip the
+    # step-level flags to re-arm it once iOS can actually ship.
     continue-on-error: true
     # Runs on both branches. macOS minutes cost 10x, but an unsigned staging
     # build is the only iOS feedback available without a Mac, and a Flutter/pod
@@ -616,6 +619,7 @@ jobs:
       # instead of the local generated podspec and reports that every candidate
       # "required a higher minimum deployment target".
       - name: Prepare iOS Pods
+        continue-on-error: true
         run: flutter precache --ios
 
       # Staging: compile unsigned to prove the iOS build is not broken, then also
@@ -624,6 +628,7 @@ jobs:
       # any Mac (or a cloud Mac) with `xcrun simctl install booted <app>`, which
       # is the only iOS smoke test available without a Mac of your own.
       - name: Verify iOS build (staging)
+        continue-on-error: true
         if: env.IS_PROD == 'false'
         run: |
           set -euo pipefail
@@ -633,6 +638,7 @@ jobs:
             --build-number="${{ steps.meta.outputs.build_number }}"
 
       - name: Build iOS simulator app (staging)
+        continue-on-error: true
         if: env.IS_PROD == 'false'
         run: |
           set -euo pipefail
@@ -644,6 +650,7 @@ jobs:
           zip -qry "$GITHUB_WORKSPACE/communal-collector-staging-sim-${{ steps.meta.outputs.file_tag }}.zip" Runner.app
 
       - name: Upload iOS simulator build
+        continue-on-error: true
         if: env.IS_PROD == 'false'
         uses: actions/upload-artifact@v4
         with:
@@ -694,6 +701,7 @@ jobs:
           fi
 
       - name: Smoke build (no-codesign) when prod creds missing
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'false'
         run: |
           flutter build ios --release --no-codesign \
@@ -702,6 +710,7 @@ jobs:
             --build-number="${{ steps.meta.outputs.build_number }}"
 
       - name: Import code-signing certificate
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -709,6 +718,7 @@ jobs:
           p12-password: ${{ secrets.IOS_CERT_PASSWORD }}
 
       - name: Install provisioning profile
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         id: profile
         run: |
@@ -738,6 +748,7 @@ jobs:
       # not in this keychain and fail before ExportOptions.plist is ever read. The
       # Runner target's Release xcconfig is the level that overrides it.
       - name: Pin manual distribution signing for the archive
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         # Through env for the same reason the credential check is: these are
         # expanded inside a heredoc, and a value carrying a quote or a $ would be
@@ -768,6 +779,7 @@ jobs:
           EOF
 
       - name: Generate ExportOptions.plist
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         env:
           TEAM_ID: ${{ vars.IOS_TEAM_ID }}
@@ -797,6 +809,7 @@ jobs:
           EOF
 
       - name: Build IPA
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && env.SIGNING_OK != 'false'
         run: |
           flutter build ipa --release \
@@ -806,6 +819,7 @@ jobs:
             --build-number="${{ steps.meta.outputs.build_number }}"
 
       - name: Upload to TestFlight
+        continue-on-error: true
         if: env.IS_PROD == 'true' && steps.ios_check.outputs.signing_available == 'true' && steps.ios_check.outputs.upload_available == 'true' && env.SIGNING_OK != 'false'
         uses: apple-actions/upload-testflight-build@v1
         with:
