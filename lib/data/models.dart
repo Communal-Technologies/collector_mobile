@@ -29,6 +29,10 @@ class CollectorGrant {
     required this.commissionValue,
     required this.cashLimitMinor,
     required this.status,
+    this.collectionAccountNumber = '',
+    this.collectionAccountName = '',
+    this.collectionBank = '',
+    this.subAccountStatus = 'none',
     this.currency = 'NGN',
     this.currencySymbol = '',
     this.currencySymbolPosition = 'left',
@@ -45,6 +49,18 @@ class CollectorGrant {
   final int? cashLimitMinor;
   final String status;
 
+  /// The cooperative's collection account for this collector: a member with no
+  /// cash, and no Communal wallet to pay from, transfers here instead. It is a
+  /// sub-account of the COOPERATIVE's own account, so what lands in it is theirs
+  /// already — unlike the float, there is nothing here to hand in.
+  final String collectionAccountNumber;
+  final String collectionAccountName;
+  final String collectionBank;
+
+  /// none | requested | active | failed. A cooperative that has not finished its
+  /// own onboarding has nothing to open one against, so `none` is ordinary.
+  final String subAccountStatus;
+
   /// How this cooperative writes its money, off its own settings. Carried on the
   /// grant because the person may collect for another one that chose differently.
   final String currency;
@@ -54,13 +70,17 @@ class CollectorGrant {
   bool get isActive => status == 'active';
   bool get postsOnCollection => settlementMode == 'on_collection';
 
+  /// Only an account with a number can be given to a member to pay into.
+  bool get hasCollectionAccount =>
+      subAccountStatus == 'active' && collectionAccountNumber.isNotEmpty;
+
   /// The symbol, the side it sits on and the code behind it, ready to write a
   /// figure with.
   CurrencyDisplay get currencyDisplay => CurrencyDisplay(
-        code: currency.trim().isEmpty ? 'NGN' : currency.trim().toUpperCase(),
-        symbol: currencySymbol,
-        position: currencySymbolPositionFrom(currencySymbolPosition),
-      );
+    code: currency.trim().isEmpty ? 'NGN' : currency.trim().toUpperCase(),
+    symbol: currencySymbol,
+    position: currencySymbolPositionFrom(currencySymbolPosition),
+  );
 
   /// What the cooperative pays this person, in words. Percentage is basis points
   /// and flat is kobo per collection, so neither is shown raw.
@@ -95,33 +115,43 @@ class CollectorGrant {
       commissionValue: _asInt(json['commission_value']),
       cashLimitMinor: _asNullableInt(json['cash_limit_minor']),
       status: _asString(json['status']),
+      collectionAccountNumber: _asString(json['collection_account_number']),
+      collectionAccountName: _asString(json['collection_account_name']),
+      collectionBank: _asString(json['collection_bank']),
+      subAccountStatus: _asString(json['subaccount_status']).trim().isEmpty
+          ? 'none'
+          : _asString(json['subaccount_status']).trim(),
       currency: _asString(json['currency']).trim().isEmpty
           ? 'NGN'
           : _asString(json['currency']).trim().toUpperCase(),
       currencySymbol: _asString(json['currency_symbol']).trim(),
       currencySymbolPosition:
           _asString(json['currency_symbol_position']).trim().toLowerCase() ==
-                  'right'
-              ? 'right'
-              : 'left',
+              'right'
+          ? 'right'
+          : 'left',
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'collector_id': collectorId,
-        'collector_code': collectorCode,
-        'cooperative_id': cooperativeId,
-        'cooperative_name': cooperativeName,
-        'full_name': fullName,
-        'settlement_mode': settlementMode,
-        'commission_type': commissionType,
-        'commission_value': commissionValue,
-        'cash_limit_minor': cashLimitMinor,
-        'status': status,
-        'currency': currency,
-        'currency_symbol': currencySymbol,
-        'currency_symbol_position': currencySymbolPosition,
-      };
+    'collector_id': collectorId,
+    'collector_code': collectorCode,
+    'cooperative_id': cooperativeId,
+    'cooperative_name': cooperativeName,
+    'full_name': fullName,
+    'settlement_mode': settlementMode,
+    'commission_type': commissionType,
+    'commission_value': commissionValue,
+    'cash_limit_minor': cashLimitMinor,
+    'status': status,
+    'collection_account_number': collectionAccountNumber,
+    'collection_account_name': collectionAccountName,
+    'collection_bank': collectionBank,
+    'subaccount_status': subAccountStatus,
+    'currency': currency,
+    'currency_symbol': currencySymbol,
+    'currency_symbol_position': currencySymbolPosition,
+  };
 }
 
 /// How much of the cooperative's money is in this collector's hands right now —
@@ -204,9 +234,9 @@ class CollectorMember {
   /// member's doing, so neither is worded as though it were.
   String get standingNote => standing == 'suspended'
       ? 'The cooperative has suspended this account. No collection can be recorded '
-          'against it until they reinstate it.'
+            'against it until they reinstate it.'
       : 'This membership is not active — the cooperative has to renew it before a '
-          'collection can be recorded against it.';
+            'collection can be recorded against it.';
 
   factory CollectorMember.fromJson(Map<String, dynamic> json) {
     final standing = _asString(json['standing']);
@@ -435,7 +465,9 @@ class CollectionTarget {
   /// or in part, and never falls due again — so it carries no frequency and its own
   /// due date is only what it was raised against.
   factory CollectionTarget.fine(MemberFine fine, {String against = ''}) {
-    final what = fine.description.isNotEmpty ? fine.description : 'late payment';
+    final what = fine.description.isNotEmpty
+        ? fine.description
+        : 'late payment';
     return CollectionTarget(
       key: 'fine:${fine.id}',
       obligationCode: '',
@@ -516,26 +548,19 @@ class CollectionAllocation {
   }
 
   Map<String, dynamic> toJson() => {
-        'obligation': obligationCode,
-        'title': title,
-        'amount': amount,
-        if (fineId.isNotEmpty) 'fine_id': fineId,
-      };
+    'obligation': obligationCode,
+    'title': title,
+    'amount': amount,
+    if (fineId.isNotEmpty) 'fine_id': fineId,
+  };
 
   /// The wire shape obligations-svc accepts. `title` is the app's own label and has
   /// no place in the request. An obligation line carries no `target_type` at all:
   /// the service reads its absence as an obligation, and a receipt queued by an
   /// older build has to keep sending exactly what it always sent.
   Map<String, dynamic> toRequestJson() => isFine
-      ? {
-          'target_type': 'fine',
-          'fine_id': fineId,
-          'amount': amount,
-        }
-      : {
-          'obligation': obligationCode,
-          'amount': amount,
-        };
+      ? {'target_type': 'fine', 'fine_id': fineId, 'amount': amount}
+      : {'obligation': obligationCode, 'amount': amount};
 }
 
 /// A receipt. `pending` is a record waiting for an administrator to countersign the
@@ -791,10 +816,10 @@ class CollectorProfile {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'first_name': firstName,
-        'last_name': lastName,
-        'phone': phone,
-        'email': email,
-      };
+    'id': id,
+    'first_name': firstName,
+    'last_name': lastName,
+    'phone': phone,
+    'email': email,
+  };
 }
