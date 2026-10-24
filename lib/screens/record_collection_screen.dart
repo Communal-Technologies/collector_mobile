@@ -404,16 +404,63 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
     if (!mounted) return;
     setState(() => _saving = false);
 
-    final account = collection.paymentAccount;
-    if (account == null) {
+    // The account is opened at the bank on the other side of the broker, so it
+    // arrives a moment after the receipt does. Waiting here, with the receipt
+    // already filed, is the honest shape: nothing is lost if this screen closes,
+    // because the number lands on the receipt either way.
+    final account = await _awaitTransferAccount(collection);
+    if (!mounted) return;
+    if (account == null || !account.isUsable) {
+      final why = account?.failureReason ?? '';
       setState(
-        () => _error =
-            'The cooperative could not open an account for this payment. Take cash instead.',
+        () => _error = account == null
+            ? 'The account is still being opened. Open receipt ${collection.reference} '
+                  'from Receipts in a moment to read the number out.'
+            : why.isEmpty
+            ? 'The cooperative could not open an account for this payment. Take cash instead.'
+            : 'The account could not be opened: $why. Take cash instead.',
       );
       return;
     }
     await _showTransferAccount(collection, account);
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// Re-reads the receipt until the account has a number, or gives up.
+  ///
+  /// Returns null while it is still being opened — which is not a failure: the
+  /// receipt is filed and the number will be on it.
+  Future<CollectionPaymentAccount?> _awaitTransferAccount(
+    Collection collection,
+  ) async {
+    final repository = context.read<CollectorRepository>();
+    var waited = Duration.zero;
+    const step = Duration(milliseconds: 1200);
+    const giveUpAfter = Duration(seconds: 30);
+
+    var account = collection.paymentAccount;
+    while (mounted && waited < giveUpAfter) {
+      if (account != null && (account.isUsable || account.hasFailed)) {
+        return account;
+      }
+      await Future<void>.delayed(step);
+      waited += step;
+      if (!mounted) return account;
+      try {
+        final fresh = await repository.collection(
+          widget.grant.cooperativeId,
+          collection.id,
+        );
+        account = fresh.paymentAccount;
+      } on ApiException {
+        // Keep waiting: a dropped poll says nothing about whether the account was
+        // opened, and the next one will tell us.
+      }
+    }
+    if (account != null && (account.isUsable || account.hasFailed)) {
+      return account;
+    }
+    return null;
   }
 
   /// The number to read out, and what happens when the money lands.

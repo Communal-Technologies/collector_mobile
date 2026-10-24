@@ -640,6 +640,7 @@ class CollectionPaymentAccount {
     required this.creditedAmount,
     required this.status,
     required this.expiresAt,
+    this.failureReason = '',
   });
 
   final String accountNumber;
@@ -649,6 +650,13 @@ class CollectionPaymentAccount {
   final int creditedAmount;
   final String status;
   final DateTime? expiresAt;
+  final String failureReason;
+
+  /// The account is still being opened at the bank. The row exists so the answer
+  /// has somewhere to land; there is no number to read out yet.
+  bool get isBeingOpened => status == 'requested';
+  bool get hasFailed => status == 'failed';
+  bool get isUsable => accountNumber.isNotEmpty && !hasFailed && !hasLapsed;
 
   bool get isPaid => status == 'paid';
   bool get isPartPaid => status == 'part_paid';
@@ -670,6 +678,7 @@ class CollectionPaymentAccount {
       creditedAmount: _asInt(json['credited_amount']),
       status: _asString(json['status']),
       expiresAt: Dates.tryParse(json['expires_at']),
+      failureReason: _asString(json['failure_reason']),
     );
   }
 }
