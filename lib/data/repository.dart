@@ -50,7 +50,11 @@ class AuthRepository {
     final body = <String, dynamic>{'login': login};
     if ((pin ?? '').isNotEmpty) body['pin'] = pin;
     if ((channel ?? '').isNotEmpty) body['channel'] = channel;
-    final data = await _api.post(ApiPaths.loginRequest, body: body, anonymous: true);
+    final data = await _api.post(
+      ApiPaths.loginRequest,
+      body: body,
+      anonymous: true,
+    );
     return LoginChallenge.fromJson(data);
   }
 
@@ -60,7 +64,11 @@ class AuthRepository {
   }) async {
     final body = <String, dynamic>{'challenge_id': challengeId};
     if ((channel ?? '').isNotEmpty) body['channel'] = channel;
-    final data = await _api.post(ApiPaths.loginResend, body: body, anonymous: true);
+    final data = await _api.post(
+      ApiPaths.loginResend,
+      body: body,
+      anonymous: true,
+    );
     // The resend answers with the channel it used and nothing about the grants, so
     // the challenge id and the grants already on screen are carried forward.
     return LoginChallenge.fromJson({...data, 'challenge_id': challengeId});
@@ -80,7 +88,11 @@ class AuthRepository {
       'remember_me': rememberMe,
     };
     if ((newPin ?? '').isNotEmpty) body['new_pin'] = newPin;
-    final data = await _api.post(ApiPaths.loginVerify, body: body, anonymous: true);
+    final data = await _api.post(
+      ApiPaths.loginVerify,
+      body: body,
+      anonymous: true,
+    );
     return LoginResult(
       token: (data['token'] ?? '').toString(),
       refreshToken: (data['refresh_token'] ?? '').toString(),
@@ -150,7 +162,7 @@ class AuthRepository {
 /// Everything the app reads and writes once it is signed in.
 class CollectorRepository {
   CollectorRepository(this._api, {LocalCache? cache})
-      : _cache = cache ?? LocalCache();
+    : _cache = cache ?? LocalCache();
 
   final ApiClient _api;
   final LocalCache _cache;
@@ -200,11 +212,14 @@ class CollectorRepository {
   }) async {
     final key = 'members:$cooperativeId';
     try {
-      final data = await _api.get(ApiPaths.members, query: {
-        'cooperative': cooperativeId,
-        if (query.trim().isNotEmpty) 'q': query.trim(),
-        'limit': limit,
-      });
+      final data = await _api.get(
+        ApiPaths.members,
+        query: {
+          'cooperative': cooperativeId,
+          if (query.trim().isNotEmpty) 'q': query.trim(),
+          'limit': limit,
+        },
+      );
       final rows = _list(data, 'members');
       // Only the whole roster is cached. A search result is a slice of it, and
       // caching slices would leave the device with a roster that has holes in it.
@@ -219,11 +234,13 @@ class CollectorRepository {
       final filtered = needle.isEmpty
           ? all
           : all
-              .where((m) =>
-                  m.fullName.toLowerCase().contains(needle) ||
-                  m.ledgerNumber.toLowerCase().contains(needle) ||
-                  m.phone.contains(needle))
-              .toList();
+                .where(
+                  (m) =>
+                      m.fullName.toLowerCase().contains(needle) ||
+                      m.ledgerNumber.toLowerCase().contains(needle) ||
+                      m.phone.contains(needle),
+                )
+                .toList();
       return Cached(filtered, stale: true);
     }
   }
@@ -245,10 +262,7 @@ class CollectorRepository {
       if (!e.isTransport) rethrow;
       final rows = await _cache.getList(key);
       if (rows == null) rethrow;
-      return Cached(
-        rows.map(MemberObligation.fromJson).toList(),
-        stale: true,
-      );
+      return Cached(rows.map(MemberObligation.fromJson).toList(), stale: true);
     }
   }
 
@@ -310,20 +324,66 @@ class CollectorRepository {
     );
   }
 
+  /// Files a collection the member is paying by transfer, and comes back with the
+  /// account to read out to them.
+  ///
+  /// Online only, deliberately: the account is minted at the bank on this call, so
+  /// unlike a cash receipt there is nothing useful to queue. A collector with no
+  /// signal takes cash.
+  Future<Collection> requestTransferCollection({
+    required String cooperativeId,
+    required String ledgerNumber,
+    required List<CollectionAllocation> allocations,
+    required String note,
+    required String clientReference,
+  }) async {
+    final data = await _api.post(
+      ApiPaths.collections,
+      body: {
+        'cooperative': cooperativeId,
+        'ledger_number': ledgerNumber,
+        'client_reference': clientReference,
+        'payment_method': 'transfer',
+        'note': note,
+        'collected_at': DateTime.now().toIso8601String(),
+        'allocations': allocations.map((a) => a.toRequestJson()).toList(),
+      },
+    );
+    return Collection.fromJson(
+      (data['collection'] as Map<String, dynamic>?) ?? const {},
+    );
+  }
+
+  /// Re-reads one collection, for watching a transfer land.
+  Future<Collection> collection(String cooperativeId, String id) async {
+    final data = await _api.get(
+      '${ApiPaths.collections}/$id',
+      query: {'cooperative': cooperativeId},
+    );
+    return Collection.fromJson(
+      (data['collection'] as Map<String, dynamic>?) ?? const {},
+    );
+  }
+
   Future<List<Collection>> collections(
     String cooperativeId, {
     String status = '',
     int limit = 50,
   }) async {
-    final data = await _api.get(ApiPaths.collections, query: {
-      'cooperative': cooperativeId,
-      if (status.isNotEmpty) 'status': status,
-      'limit': limit,
-    });
+    final data = await _api.get(
+      ApiPaths.collections,
+      query: {
+        'cooperative': cooperativeId,
+        if (status.isNotEmpty) 'status': status,
+        'limit': limit,
+      },
+    );
     return _list(data, 'collections').map(Collection.fromJson).toList();
   }
 
-  Future<List<RemittanceAccount>> remittanceAccounts(String cooperativeId) async {
+  Future<List<RemittanceAccount>> remittanceAccounts(
+    String cooperativeId,
+  ) async {
     final data = await _api.get(
       ApiPaths.remittanceAccounts,
       query: {'cooperative': cooperativeId},
@@ -337,22 +397,28 @@ class CollectorRepository {
     required int amount,
     String narration = '',
   }) async {
-    final data = await _api.post(ApiPaths.remittances, body: {
-      'cooperative_id': cooperativeId,
-      'to_repository_id': toRepositoryId,
-      'amount': amount,
-      'narration': narration,
-    });
+    final data = await _api.post(
+      ApiPaths.remittances,
+      body: {
+        'cooperative_id': cooperativeId,
+        'to_repository_id': toRepositoryId,
+        'amount': amount,
+        'narration': narration,
+      },
+    );
     return Remittance.fromJson(
       (data['data'] as Map<String, dynamic>?) ?? const {},
     );
   }
 
-  Future<List<Remittance>> remittances(String cooperativeId, {int limit = 50}) async {
-    final data = await _api.get(ApiPaths.remittances, query: {
-      'cooperative': cooperativeId,
-      'limit': limit,
-    });
+  Future<List<Remittance>> remittances(
+    String cooperativeId, {
+    int limit = 50,
+  }) async {
+    final data = await _api.get(
+      ApiPaths.remittances,
+      query: {'cooperative': cooperativeId, 'limit': limit},
+    );
     return _list(data, 'remittances').map(Remittance.fromJson).toList();
   }
 
@@ -360,10 +426,10 @@ class CollectorRepository {
     String cooperativeId, {
     int limit = 50,
   }) async {
-    final data = await _api.get(ApiPaths.earnings, query: {
-      'cooperative': cooperativeId,
-      'limit': limit,
-    });
+    final data = await _api.get(
+      ApiPaths.earnings,
+      query: {'cooperative': cooperativeId, 'limit': limit},
+    );
     return (
       EarningsSummary.fromJson(
         (data['summary'] as Map<String, dynamic>?) ?? const {},

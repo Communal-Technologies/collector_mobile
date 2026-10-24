@@ -578,6 +578,7 @@ class Collection {
     required this.createdAt,
     required this.declineReason,
     required this.allocations,
+    this.paymentAccount,
   });
 
   final String id;
@@ -591,6 +592,9 @@ class Collection {
   final DateTime? createdAt;
   final String declineReason;
   final List<CollectionAllocation> allocations;
+
+  /// Set only on a collection the member is paying by transfer.
+  final CollectionPaymentAccount? paymentAccount;
 
   bool get isPending => status == 'pending';
   bool get isDeclined => status == 'declined';
@@ -612,6 +616,60 @@ class Collection {
           .whereType<Map<String, dynamic>>()
           .map(CollectionAllocation.fromJson)
           .toList(),
+      paymentAccount: json['payment_account'] is Map<String, dynamic>
+          ? CollectionPaymentAccount.fromJson(
+              json['payment_account'] as Map<String, dynamic>,
+            )
+          : null,
+    );
+  }
+}
+
+/// The account one member pays one collection into.
+///
+/// Minted per collection, so the number itself is the attribution — the server
+/// matches the credit by it and needs nothing from the collector. It settles into
+/// the cooperative's own account, so unlike cash in a bag there is nothing here
+/// for the collector to hand in and nothing counted against their cash limit.
+class CollectionPaymentAccount {
+  const CollectionPaymentAccount({
+    required this.accountNumber,
+    required this.accountName,
+    required this.bankName,
+    required this.expectedAmount,
+    required this.creditedAmount,
+    required this.status,
+    required this.expiresAt,
+  });
+
+  final String accountNumber;
+  final String accountName;
+  final String bankName;
+  final int expectedAmount;
+  final int creditedAmount;
+  final String status;
+  final DateTime? expiresAt;
+
+  bool get isPaid => status == 'paid';
+  bool get isPartPaid => status == 'part_paid';
+  bool get hasLapsed =>
+      status == 'expired' ||
+      (expiresAt != null && expiresAt!.isBefore(DateTime.now()));
+
+  int get outstanding {
+    final left = expectedAmount - creditedAmount;
+    return left > 0 ? left : 0;
+  }
+
+  factory CollectionPaymentAccount.fromJson(Map<String, dynamic> json) {
+    return CollectionPaymentAccount(
+      accountNumber: _asString(json['account_number']),
+      accountName: _asString(json['account_name']),
+      bankName: _asString(json['bank_name']),
+      expectedAmount: _asInt(json['expected_amount']),
+      creditedAmount: _asInt(json['credited_amount']),
+      status: _asString(json['status']),
+      expiresAt: Dates.tryParse(json['expires_at']),
     );
   }
 }
