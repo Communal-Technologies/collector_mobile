@@ -29,6 +29,10 @@ class CollectorGrant {
     required this.commissionValue,
     required this.cashLimitMinor,
     required this.status,
+    this.collectionAccountNumber = '',
+    this.collectionAccountName = '',
+    this.collectionBank = '',
+    this.subAccountStatus = 'none',
     this.currency = 'NGN',
     this.currencySymbol = '',
     this.currencySymbolPosition = 'left',
@@ -45,6 +49,18 @@ class CollectorGrant {
   final int? cashLimitMinor;
   final String status;
 
+  /// The cooperative's collection account for this collector: a member with no
+  /// cash, and no Communal wallet to pay from, transfers here instead. It is a
+  /// sub-account of the COOPERATIVE's own account, so what lands in it is theirs
+  /// already — unlike the float, there is nothing here to hand in.
+  final String collectionAccountNumber;
+  final String collectionAccountName;
+  final String collectionBank;
+
+  /// none | requested | active | failed. A cooperative that has not finished its
+  /// own onboarding has nothing to open one against, so `none` is ordinary.
+  final String subAccountStatus;
+
   /// How this cooperative writes its money, off its own settings. Carried on the
   /// grant because the person may collect for another one that chose differently.
   final String currency;
@@ -54,13 +70,17 @@ class CollectorGrant {
   bool get isActive => status == 'active';
   bool get postsOnCollection => settlementMode == 'on_collection';
 
+  /// Only an account with a number can be given to a member to pay into.
+  bool get hasCollectionAccount =>
+      subAccountStatus == 'active' && collectionAccountNumber.isNotEmpty;
+
   /// The symbol, the side it sits on and the code behind it, ready to write a
   /// figure with.
   CurrencyDisplay get currencyDisplay => CurrencyDisplay(
-        code: currency.trim().isEmpty ? 'NGN' : currency.trim().toUpperCase(),
-        symbol: currencySymbol,
-        position: currencySymbolPositionFrom(currencySymbolPosition),
-      );
+    code: currency.trim().isEmpty ? 'NGN' : currency.trim().toUpperCase(),
+    symbol: currencySymbol,
+    position: currencySymbolPositionFrom(currencySymbolPosition),
+  );
 
   /// What the cooperative pays this person, in words. Percentage is basis points
   /// and flat is kobo per collection, so neither is shown raw.
@@ -95,33 +115,43 @@ class CollectorGrant {
       commissionValue: _asInt(json['commission_value']),
       cashLimitMinor: _asNullableInt(json['cash_limit_minor']),
       status: _asString(json['status']),
+      collectionAccountNumber: _asString(json['collection_account_number']),
+      collectionAccountName: _asString(json['collection_account_name']),
+      collectionBank: _asString(json['collection_bank']),
+      subAccountStatus: _asString(json['subaccount_status']).trim().isEmpty
+          ? 'none'
+          : _asString(json['subaccount_status']).trim(),
       currency: _asString(json['currency']).trim().isEmpty
           ? 'NGN'
           : _asString(json['currency']).trim().toUpperCase(),
       currencySymbol: _asString(json['currency_symbol']).trim(),
       currencySymbolPosition:
           _asString(json['currency_symbol_position']).trim().toLowerCase() ==
-                  'right'
-              ? 'right'
-              : 'left',
+              'right'
+          ? 'right'
+          : 'left',
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'collector_id': collectorId,
-        'collector_code': collectorCode,
-        'cooperative_id': cooperativeId,
-        'cooperative_name': cooperativeName,
-        'full_name': fullName,
-        'settlement_mode': settlementMode,
-        'commission_type': commissionType,
-        'commission_value': commissionValue,
-        'cash_limit_minor': cashLimitMinor,
-        'status': status,
-        'currency': currency,
-        'currency_symbol': currencySymbol,
-        'currency_symbol_position': currencySymbolPosition,
-      };
+    'collector_id': collectorId,
+    'collector_code': collectorCode,
+    'cooperative_id': cooperativeId,
+    'cooperative_name': cooperativeName,
+    'full_name': fullName,
+    'settlement_mode': settlementMode,
+    'commission_type': commissionType,
+    'commission_value': commissionValue,
+    'cash_limit_minor': cashLimitMinor,
+    'status': status,
+    'collection_account_number': collectionAccountNumber,
+    'collection_account_name': collectionAccountName,
+    'collection_bank': collectionBank,
+    'subaccount_status': subAccountStatus,
+    'currency': currency,
+    'currency_symbol': currencySymbol,
+    'currency_symbol_position': currencySymbolPosition,
+  };
 }
 
 /// How much of the cooperative's money is in this collector's hands right now —
@@ -204,9 +234,9 @@ class CollectorMember {
   /// member's doing, so neither is worded as though it were.
   String get standingNote => standing == 'suspended'
       ? 'The cooperative has suspended this account. No collection can be recorded '
-          'against it until they reinstate it.'
+            'against it until they reinstate it.'
       : 'This membership is not active — the cooperative has to renew it before a '
-          'collection can be recorded against it.';
+            'collection can be recorded against it.';
 
   factory CollectorMember.fromJson(Map<String, dynamic> json) {
     final standing = _asString(json['standing']);
@@ -435,7 +465,9 @@ class CollectionTarget {
   /// or in part, and never falls due again — so it carries no frequency and its own
   /// due date is only what it was raised against.
   factory CollectionTarget.fine(MemberFine fine, {String against = ''}) {
-    final what = fine.description.isNotEmpty ? fine.description : 'late payment';
+    final what = fine.description.isNotEmpty
+        ? fine.description
+        : 'late payment';
     return CollectionTarget(
       key: 'fine:${fine.id}',
       obligationCode: '',
@@ -516,26 +548,19 @@ class CollectionAllocation {
   }
 
   Map<String, dynamic> toJson() => {
-        'obligation': obligationCode,
-        'title': title,
-        'amount': amount,
-        if (fineId.isNotEmpty) 'fine_id': fineId,
-      };
+    'obligation': obligationCode,
+    'title': title,
+    'amount': amount,
+    if (fineId.isNotEmpty) 'fine_id': fineId,
+  };
 
   /// The wire shape obligations-svc accepts. `title` is the app's own label and has
   /// no place in the request. An obligation line carries no `target_type` at all:
   /// the service reads its absence as an obligation, and a receipt queued by an
   /// older build has to keep sending exactly what it always sent.
   Map<String, dynamic> toRequestJson() => isFine
-      ? {
-          'target_type': 'fine',
-          'fine_id': fineId,
-          'amount': amount,
-        }
-      : {
-          'obligation': obligationCode,
-          'amount': amount,
-        };
+      ? {'target_type': 'fine', 'fine_id': fineId, 'amount': amount}
+      : {'obligation': obligationCode, 'amount': amount};
 }
 
 /// A receipt. `pending` is a record waiting for an administrator to countersign the
@@ -553,6 +578,7 @@ class Collection {
     required this.createdAt,
     required this.declineReason,
     required this.allocations,
+    this.paymentAccount,
   });
 
   final String id;
@@ -566,6 +592,9 @@ class Collection {
   final DateTime? createdAt;
   final String declineReason;
   final List<CollectionAllocation> allocations;
+
+  /// Set only on a collection the member is paying by transfer.
+  final CollectionPaymentAccount? paymentAccount;
 
   bool get isPending => status == 'pending';
   bool get isDeclined => status == 'declined';
@@ -587,6 +616,69 @@ class Collection {
           .whereType<Map<String, dynamic>>()
           .map(CollectionAllocation.fromJson)
           .toList(),
+      paymentAccount: json['payment_account'] is Map<String, dynamic>
+          ? CollectionPaymentAccount.fromJson(
+              json['payment_account'] as Map<String, dynamic>,
+            )
+          : null,
+    );
+  }
+}
+
+/// The account one member pays one collection into.
+///
+/// Minted per collection, so the number itself is the attribution — the server
+/// matches the credit by it and needs nothing from the collector. It settles into
+/// the cooperative's own account, so unlike cash in a bag there is nothing here
+/// for the collector to hand in and nothing counted against their cash limit.
+class CollectionPaymentAccount {
+  const CollectionPaymentAccount({
+    required this.accountNumber,
+    required this.accountName,
+    required this.bankName,
+    required this.expectedAmount,
+    required this.creditedAmount,
+    required this.status,
+    required this.expiresAt,
+    this.failureReason = '',
+  });
+
+  final String accountNumber;
+  final String accountName;
+  final String bankName;
+  final int expectedAmount;
+  final int creditedAmount;
+  final String status;
+  final DateTime? expiresAt;
+  final String failureReason;
+
+  /// The account is still being opened at the bank. The row exists so the answer
+  /// has somewhere to land; there is no number to read out yet.
+  bool get isBeingOpened => status == 'requested';
+  bool get hasFailed => status == 'failed';
+  bool get isUsable => accountNumber.isNotEmpty && !hasFailed && !hasLapsed;
+
+  bool get isPaid => status == 'paid';
+  bool get isPartPaid => status == 'part_paid';
+  bool get hasLapsed =>
+      status == 'expired' ||
+      (expiresAt != null && expiresAt!.isBefore(DateTime.now()));
+
+  int get outstanding {
+    final left = expectedAmount - creditedAmount;
+    return left > 0 ? left : 0;
+  }
+
+  factory CollectionPaymentAccount.fromJson(Map<String, dynamic> json) {
+    return CollectionPaymentAccount(
+      accountNumber: _asString(json['account_number']),
+      accountName: _asString(json['account_name']),
+      bankName: _asString(json['bank_name']),
+      expectedAmount: _asInt(json['expected_amount']),
+      creditedAmount: _asInt(json['credited_amount']),
+      status: _asString(json['status']),
+      expiresAt: Dates.tryParse(json['expires_at']),
+      failureReason: _asString(json['failure_reason']),
     );
   }
 }
@@ -791,10 +883,10 @@ class CollectorProfile {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'first_name': firstName,
-        'last_name': lastName,
-        'phone': phone,
-        'email': email,
-      };
+    'id': id,
+    'first_name': firstName,
+    'last_name': lastName,
+    'phone': phone,
+    'email': email,
+  };
 }

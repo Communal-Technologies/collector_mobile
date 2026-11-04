@@ -175,6 +175,48 @@ class _RemitTabState extends State<RemitTab> {
                     ],
                   ),
                 ),
+              if (widget.grant.hasCollectionAccount) ...[
+                const SizedBox(height: 14),
+                SectionCard(
+                  title: 'Members can transfer here',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.grant.collectionAccountNumber,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.grant.collectionAccountName,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.muted,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      // The distinction that matters to them: this is not their
+                      // cash and never enters their float, so none of it is ever
+                      // theirs to hand in or to be short of.
+                      const Text(
+                        'A member with no cash can transfer to this account from any '
+                        'bank app. It goes straight to the cooperative, so it never '
+                        'counts as cash in your hand and there is nothing here for '
+                        'you to hand in.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
               SectionCard(
                 title: 'Hand in cash',
@@ -477,6 +519,23 @@ class _RemittanceRow extends StatelessWidget {
               ),
             ],
           ),
+          // A pending hand-in is waiting on a person, not on the app. Saying who
+          // and where stops it reading as something that failed: the collections
+          // on this cash may well have been approved already, and that is a
+          // different signature from counting the money in.
+          if (remittance.status.toLowerCase() == 'pending') ...[
+            const SizedBox(height: 6),
+            Text(
+              remittance.toAccountName.isEmpty
+                  ? 'Waiting for an administrator to count the cash and approve it. '
+                        'Approving your collections is not the same signature, so '
+                        'this stays here until they do.'
+                  : 'Waiting for an administrator to count the cash and approve it '
+                        'into ${remittance.toAccountName}. Approving your collections '
+                        'is not the same signature, so this stays here until they do.',
+              style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+          ],
           if (remittance.failureReason.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(

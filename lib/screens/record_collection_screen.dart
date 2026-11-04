@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:iconsax/iconsax.dart';
 
@@ -75,9 +76,9 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
   void initState() {
     super.initState();
     _future = context.read<CollectorRepository>().memberCollectibles(
-          widget.grant.cooperativeId,
-          widget.member.ledgerNumber,
-        );
+      widget.grant.cooperativeId,
+      widget.member.ledgerNumber,
+    );
     _loadStanding();
   }
 
@@ -90,9 +91,9 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
 
   Future<void> _loadStanding() async {
     try {
-      final standing = await context
-          .read<CollectorRepository>()
-          .standing(widget.grant.cooperativeId);
+      final standing = await context.read<CollectorRepository>().standing(
+        widget.grant.cooperativeId,
+      );
       if (mounted) setState(() => _standing = standing);
     } catch (_) {
       // No standing to check against. The server still checks the limit when the
@@ -138,13 +139,17 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
         .read<OutboxCubit>()
         .state
         .queued
-        .where((i) =>
-            i.cooperativeId == widget.grant.cooperativeId &&
-            i.ledgerNumber == widget.member.ledgerNumber)
+        .where(
+          (i) =>
+              i.cooperativeId == widget.grant.cooperativeId &&
+              i.ledgerNumber == widget.member.ledgerNumber,
+        )
         .expand((i) => i.allocations)
-        .where((a) => target.isFine
-            ? a.fineId == target.fineId
-            : !a.isFine && a.obligationCode == target.obligationCode)
+        .where(
+          (a) => target.isFine
+              ? a.fineId == target.fineId
+              : !a.isFine && a.obligationCode == target.obligationCode,
+        )
         .fold<int>(0, (sum, a) => sum + a.amount);
     final left = ceiling - queued;
     return left > 0 ? left : 0;
@@ -234,8 +239,8 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
         final amount = ceiling == null
             ? target.outstanding
             : target.outstanding < ceiling
-                ? target.outstanding
-                : ceiling;
+            ? target.outstanding
+            : ceiling;
         if (amount > 0) _allocated[target.key] = amount;
       }
       _error = '';
@@ -279,6 +284,37 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
   }
 
   Future<void> _record(List<CollectionTarget> targets) async {
+    final allocations = _allocationsFor(targets, checkCashLimit: true);
+    if (allocations == null) return;
+    final total = allocations.fold<int>(0, (sum, a) => sum + a.amount);
+
+    setState(() {
+      _saving = true;
+      _error = '';
+    });
+    final receipt = await context.read<OutboxCubit>().record(
+      cooperativeId: widget.grant.cooperativeId,
+      ledgerNumber: widget.member.ledgerNumber,
+      memberName: widget.member.fullName,
+      allocations: allocations,
+      note: _note.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    await _showReceipt(receipt, total);
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// The lines on this receipt, or null when something on the screen is wrong and
+  /// the collector has been told so.
+  ///
+  /// checkCashLimit is false for a transfer: that money goes straight to the
+  /// cooperative and is carried by nobody, so a collector already at their limit
+  /// may still take one.
+  List<CollectionAllocation>? _allocationsFor(
+    List<CollectionTarget> targets, {
+    required bool checkCashLimit,
+  }) {
     // Built off the full list, never the filtered one: a lens or a search must not
     // be able to drop an amount the collector already entered.
     final allocations = <CollectionAllocation>[];
@@ -290,56 +326,222 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
       // gone.
       final ceiling = _ceiling(target);
       if (ceiling != null && amount > ceiling) {
-        setState(() => _error = ceiling <= 0
-            ? '${target.title} can take nothing more. Remove it from this receipt.'
-            : '${target.title} can only take ${Money.format(ceiling)} more. '
-                'Change what you put against it.');
-        return;
+        setState(
+          () => _error = ceiling <= 0
+              ? '${target.title} can take nothing more. Remove it from this receipt.'
+              : '${target.title} can only take ${Money.format(ceiling)} more. '
+                    'Change what you put against it.',
+        );
+        return null;
       }
-      allocations.add(CollectionAllocation(
-        obligationCode: target.obligationCode,
-        fineId: target.fineId,
-        title: target.title,
-        amount: amount,
-      ));
+      allocations.add(
+        CollectionAllocation(
+          obligationCode: target.obligationCode,
+          fineId: target.fineId,
+          title: target.title,
+          amount: amount,
+        ),
+      );
     }
     if (allocations.isEmpty) {
-      setState(() => _error =
-          'Enter what the member paid against at least one account or fine.');
-      return;
+      setState(
+        () => _error =
+            'Enter what the member paid against at least one account or fine.',
+      );
+      return null;
     }
-    final total = allocations.fold<int>(0, (sum, a) => sum + a.amount);
-    final headroom = _headroom;
-    if (headroom != null && total > headroom) {
-      setState(() => _error =
-          'You can only take ${Money.format(headroom < 0 ? 0 : headroom)} more before you '
-          'reach the cash limit your cooperative set. Remit what you are holding first.');
-      return;
+    if (checkCashLimit) {
+      final total = allocations.fold<int>(0, (sum, a) => sum + a.amount);
+      final headroom = _headroom;
+      if (headroom != null && total > headroom) {
+        setState(
+          () => _error =
+              'You can only take ${Money.format(headroom < 0 ? 0 : headroom)} more before you '
+              'reach the cash limit your cooperative set. Remit what you are holding first.',
+        );
+        return null;
+      }
     }
+    return allocations;
+  }
+
+  /// Files the receipt and asks for an account the member can transfer into.
+  ///
+  /// Online only, and said so plainly: the account is minted at the bank on this
+  /// call, so unlike a cash receipt there is nothing useful to keep on the phone.
+  /// A collector with no signal takes cash.
+  Future<void> _recordByTransfer(List<CollectionTarget> targets) async {
+    final allocations = _allocationsFor(targets, checkCashLimit: false);
+    if (allocations == null) return;
 
     setState(() {
       _saving = true;
       _error = '';
     });
-    final receipt = await context.read<OutboxCubit>().record(
-          cooperativeId: widget.grant.cooperativeId,
-          ledgerNumber: widget.member.ledgerNumber,
-          memberName: widget.member.fullName,
-          allocations: allocations,
-          note: _note.text.trim(),
-        );
+
+    Collection collection;
+    try {
+      collection = await context
+          .read<CollectorRepository>()
+          .requestTransferCollection(
+            cooperativeId: widget.grant.cooperativeId,
+            ledgerNumber: widget.member.ledgerNumber,
+            allocations: allocations,
+            note: _note.text.trim(),
+            clientReference: await ReceiptBook.next(),
+          );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e.isTransport
+            ? 'An account for the member to pay into has to be created now, and there '
+                  'is no signal. Take cash, or try again when you have a connection.'
+            : e.message;
+      });
+      return;
+    }
     if (!mounted) return;
     setState(() => _saving = false);
-    await _showReceipt(receipt, total);
+
+    // The account is opened at the bank on the other side of the broker, so it
+    // arrives a moment after the receipt does. Waiting here, with the receipt
+    // already filed, is the honest shape: nothing is lost if this screen closes,
+    // because the number lands on the receipt either way.
+    final account = await _awaitTransferAccount(collection);
+    if (!mounted) return;
+    if (account == null || !account.isUsable) {
+      final why = account?.failureReason ?? '';
+      setState(
+        () => _error = account == null
+            ? 'The account is still being opened. Open receipt ${collection.reference} '
+                  'from Receipts in a moment to read the number out.'
+            : why.isEmpty
+            ? 'The cooperative could not open an account for this payment. Take cash instead.'
+            : 'The account could not be opened: $why. Take cash instead.',
+      );
+      return;
+    }
+    await _showTransferAccount(collection, account);
     if (mounted) Navigator.of(context).pop(true);
   }
 
+  /// Re-reads the receipt until the account has a number, or gives up.
+  ///
+  /// Returns null while it is still being opened — which is not a failure: the
+  /// receipt is filed and the number will be on it.
+  Future<CollectionPaymentAccount?> _awaitTransferAccount(
+    Collection collection,
+  ) async {
+    final repository = context.read<CollectorRepository>();
+    var waited = Duration.zero;
+    const step = Duration(milliseconds: 1200);
+    const giveUpAfter = Duration(seconds: 30);
+
+    var account = collection.paymentAccount;
+    while (mounted && waited < giveUpAfter) {
+      if (account != null && (account.isUsable || account.hasFailed)) {
+        return account;
+      }
+      await Future<void>.delayed(step);
+      waited += step;
+      if (!mounted) return account;
+      try {
+        final fresh = await repository.collection(
+          widget.grant.cooperativeId,
+          collection.id,
+        );
+        account = fresh.paymentAccount;
+      } on ApiException {
+        // Keep waiting: a dropped poll says nothing about whether the account was
+        // opened, and the next one will tell us.
+      }
+    }
+    if (account != null && (account.isUsable || account.hasFailed)) {
+      return account;
+    }
+    return null;
+  }
+
+  /// The number to read out, and what happens when the money lands.
+  Future<void> _showTransferAccount(
+    Collection collection,
+    CollectionPaymentAccount account,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Member pays into this account'),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              account.accountNumber,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 24,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${account.accountName} · ${account.bankName}',
+              style: const TextStyle(fontSize: 13, color: AppColors.muted),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'For ${Money.format(account.expectedAmount)} on receipt '
+              '${collection.reference}.',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 10),
+            // The two things that decide whether the collector trusts this: the
+            // money is not theirs to carry, and nobody has to confirm it.
+            const Text(
+              'This account was made for this payment only. It goes straight to the '
+              'cooperative, so it is not cash in your hand and there is nothing for '
+              'you to hand in. The member\'s accounts move as soon as the money '
+              'arrives — no countersignature.',
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.4,
+                color: AppColors.muted,
+              ),
+            ),
+            if (account.expiresAt != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Valid until ${Dates.dayTime(account.expiresAt)}. After that ask for a new one.',
+                style: const TextStyle(fontSize: 12, color: AppColors.warning),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: account.accountNumber));
+              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                const SnackBar(content: Text('Account number copied')),
+              );
+            },
+            icon: const Icon(Iconsax.copy, size: 18),
+            label: const Text('Copy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showReceipt(PendingCollection receipt, int total) async {
-    final synced = !context
-        .read<OutboxCubit>()
-        .state
-        .items
-        .any((i) => i.clientReference == receipt.clientReference);
+    final synced = !context.read<OutboxCubit>().state.items.any(
+      (i) => i.clientReference == receipt.clientReference,
+    );
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -361,13 +563,17 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
             Text(
               synced
                   ? widget.grant.postsOnCollection
-                      ? 'It has reached the cooperative and the member\'s obligations have '
-                          'already moved.'
-                      : 'It has reached the cooperative and is waiting for an administrator '
-                          'to countersign the cash.'
+                        ? 'It has reached the cooperative and the member\'s obligations have '
+                              'already moved.'
+                        : 'It has reached the cooperative and is waiting for an administrator '
+                              'to countersign the cash.'
                   : 'It is saved on this phone and goes to the cooperative as soon as you '
-                      'have signal. Read the receipt number to the member either way.',
-              style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.muted),
+                        'have signal. Read the receipt number to the member either way.',
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: AppColors.muted,
+              ),
             ),
           ],
         ),
@@ -391,7 +597,10 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            Text(
+              name,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
             Text(
               widget.member.ledgerNumber,
               style: const TextStyle(fontSize: 11, color: AppColors.muted),
@@ -421,7 +630,8 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
             return const EmptyState(
               icon: Iconsax.archive_book,
               title: 'Nothing to collect against',
-              message: 'This member has no obligation accounts yet. The cooperative '
+              message:
+                  'This member has no obligation accounts yet. The cooperative '
                   'has to open one before a collection can be filed.',
             );
           }
@@ -434,8 +644,7 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
                 member: widget.member,
                 postsOnCollection: widget.grant.postsOnCollection,
                 onFillOwed: _blocked ? null : () => _fillOwed(targets),
-                onClear:
-                    _blocked || _allocated.isEmpty ? null : _clearAll,
+                onClear: _blocked || _allocated.isEmpty ? null : _clearAll,
               ),
               if (targets.length > _lensThreshold)
                 _LensBar(
@@ -458,6 +667,9 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
                 onRecord: _saving || _total <= 0 || _blocked
                     ? null
                     : () => _record(targets),
+                onTransfer: widget.grant.hasCollectionAccount
+                    ? () => _recordByTransfer(targets)
+                    : null,
               ),
             ],
           );
@@ -479,8 +691,8 @@ class _RecordCollectionScreenState extends State<RecordCollectionScreen> {
             title: _query.isNotEmpty
                 ? 'No account matches "$_query"'
                 : _lens == _Lens.due
-                    ? 'Nothing has fallen due'
-                    : 'Nothing is outstanding',
+                ? 'Nothing has fallen due'
+                : 'Nothing is outstanding',
             message: 'The member may still pay into any of their accounts.',
             action: OutlinedButton(
               onPressed: () => setState(() {
@@ -565,7 +777,8 @@ class _Header extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(bottom: 12),
               child: Notice(
-                text: 'No connection — these figures are from the last time this '
+                text:
+                    'No connection — these figures are from the last time this '
                     'phone reached the cooperative. What is owed may have changed.',
                 icon: Iconsax.cloud_cross,
               ),
@@ -574,7 +787,8 @@ class _Header extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Notice(
-                text: 'Any fine raised against this member directly could not be '
+                text:
+                    'Any fine raised against this member directly could not be '
                     'read — $finesError. The accounts below are still collectable, '
                     'and so are the fines shown against them.',
                 icon: Iconsax.warning_2,
@@ -602,7 +816,10 @@ class _Header extends StatelessWidget {
                       '${fines > 0 ? ' · $fines ${fines == 1 ? 'fine' : 'fines'}' : ''}'
                       '${owing > 0 ? ' · $owing owing' : ''} · '
                       '${postsOnCollection ? 'posts as you record' : 'waits to be countersigned'}',
-                      style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ],
                 ),
@@ -753,8 +970,11 @@ class _TargetRow extends StatelessWidget {
                         if (target.isFine)
                           const Padding(
                             padding: EdgeInsets.only(right: 6),
-                            child: Icon(Iconsax.slash,
-                                size: 13, color: AppColors.danger),
+                            child: Icon(
+                              Iconsax.slash,
+                              size: 13,
+                              color: AppColors.danger,
+                            ),
                           ),
                         Expanded(
                           child: Text(
@@ -790,10 +1010,12 @@ class _TargetRow extends StatelessWidget {
                                   ? '  · for ${Dates.day(target.nextDueDate)}'
                                   : '  · ${overdue ? 'due' : 'by'} ${Dates.day(target.nextDueDate)}',
                               style: TextStyle(
-                                fontWeight:
-                                    overdue ? FontWeight.w700 : FontWeight.w400,
-                                color:
-                                    overdue ? AppColors.danger : AppColors.muted,
+                                fontWeight: overdue
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: overdue
+                                    ? AppColors.danger
+                                    : AppColors.muted,
                               ),
                             ),
                         ],
@@ -819,7 +1041,10 @@ class _TargetRow extends StatelessWidget {
               const SizedBox(width: 10),
               if (filled)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.primarySoft,
                     borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -834,7 +1059,11 @@ class _TargetRow extends StatelessWidget {
                   ),
                 )
               else if (onTap != null)
-                const Icon(Iconsax.add_circle, size: 20, color: AppColors.muted),
+                const Icon(
+                  Iconsax.add_circle,
+                  size: 20,
+                  color: AppColors.muted,
+                ),
             ],
           ),
         ),
@@ -859,7 +1088,7 @@ class _TargetRow extends StatelessWidget {
         return room <= 0
             ? 'Fully receipted — awaiting approval'
             : '${Money.formatWhole(room)} can be taken · '
-                '${Money.formatWhole(outstanding - room)} awaiting approval';
+                  '${Money.formatWhole(outstanding - room)} awaiting approval';
       }
       return '${Money.formatWhole(target.amountPaid)} of '
           '${Money.formatWhole(target.amount)} paid';
@@ -896,8 +1125,9 @@ class _AmountSheet extends StatefulWidget {
 }
 
 class _AmountSheetState extends State<_AmountSheet> {
-  late final TextEditingController _amount =
-      TextEditingController(text: moneyFieldText(widget.initial));
+  late final TextEditingController _amount = TextEditingController(
+    text: moneyFieldText(widget.initial),
+  );
 
   @override
   void dispose() {
@@ -920,11 +1150,14 @@ class _AmountSheetState extends State<_AmountSheet> {
     // either; refusing it here means the collector is told before the member is given
     // a receipt for it.
     final ceiling = widget.ceiling;
-    final refusal =
-        ceiling != null && entered > ceiling ? _refusal(target, ceiling) : '';
+    final refusal = ceiling != null && entered > ceiling
+        ? _refusal(target, ceiling)
+        : '';
     // The most the collector can put here in one tap. On a capped account that is the
     // room, not what is outstanding: the difference is receipts already written.
-    final settle = ceiling != null && ceiling < outstanding ? ceiling : outstanding;
+    final settle = ceiling != null && ceiling < outstanding
+        ? ceiling
+        : outstanding;
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -959,7 +1192,11 @@ class _AmountSheetState extends State<_AmountSheet> {
               if (settle > 0)
                 ActionChip(
                   label: Text(
-                    '${target.isFine ? 'Settle' : target.recurring ? 'Pay all' : 'Pay the rest'} '
+                    '${target.isFine
+                        ? 'Settle'
+                        : target.recurring
+                        ? 'Pay all'
+                        : 'Pay the rest'} '
                     '${Money.formatWhole(settle)}',
                   ),
                   onPressed: () => _set(settle),
@@ -976,7 +1213,11 @@ class _AmountSheetState extends State<_AmountSheet> {
                 ),
               if (widget.initial > 0)
                 ActionChip(
-                  avatar: const Icon(Iconsax.trash, size: 15, color: AppColors.danger),
+                  avatar: const Icon(
+                    Iconsax.trash,
+                    size: 15,
+                    color: AppColors.danger,
+                  ),
                   label: const Text('Remove'),
                   onPressed: () => Navigator.of(context).pop(0),
                 ),
@@ -995,14 +1236,17 @@ class _AmountSheetState extends State<_AmountSheet> {
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: refusal.isNotEmpty || (entered <= 0 && widget.initial <= 0)
+              onPressed:
+                  refusal.isNotEmpty || (entered <= 0 && widget.initial <= 0)
                   ? null
                   : () => Navigator.of(context).pop(entered),
-              child: Text(entered <= 0
-                  ? target.isFine
-                      ? 'Leave this fine'
-                      : 'Leave this account'
-                  : '${widget.initial > 0 ? 'Update' : 'Add'} ${Money.format(entered)}'),
+              child: Text(
+                entered <= 0
+                    ? target.isFine
+                          ? 'Leave this fine'
+                          : 'Leave this account'
+                    : '${widget.initial > 0 ? 'Update' : 'Add'} ${Money.format(entered)}',
+              ),
             ),
           ),
         ],
@@ -1043,7 +1287,7 @@ class _AmountSheetState extends State<_AmountSheet> {
       final parts = [
         outstanding > 0
             ? '${Money.format(outstanding)} of the ${Money.format(target.amount)} '
-                'fine still standing'
+                  'fine still standing'
             : 'This fine has been settled',
         if (target.nextDueDate != null)
           'raised for ${Dates.day(target.nextDueDate)}',
@@ -1135,10 +1379,14 @@ class _ReviewSheetState extends State<_ReviewSheet> {
             Text(
               widget.postsOnCollection
                   ? 'Your cooperative has you on trust: what you record moves the '
-                      'member\'s obligations straight away.'
+                        'member\'s obligations straight away.'
                   : 'What you record waits for an administrator to countersign the '
-                      'cash before it moves the member\'s obligations.',
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35),
+                        'cash before it moves the member\'s obligations.',
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.muted,
+                height: 1.35,
+              ),
             ),
             const SizedBox(height: 12),
             for (final line in _lines)
@@ -1172,14 +1420,22 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              const Icon(Iconsax.edit_2, size: 15, color: AppColors.muted),
+                              const Icon(
+                                Iconsax.edit_2,
+                                size: 15,
+                                color: AppColors.muted,
+                              ),
                             ],
                           ),
                         ),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Iconsax.trash, size: 17, color: AppColors.danger),
+                      icon: const Icon(
+                        Iconsax.trash,
+                        size: 17,
+                        color: AppColors.danger,
+                      ),
                       onPressed: () {
                         widget.onRemove(line.key);
                         setState(() => _lines.remove(line));
@@ -1197,7 +1453,8 @@ class _ReviewSheetState extends State<_ReviewSheet> {
               maxLines: 2,
               decoration: const InputDecoration(
                 labelText: 'Note (optional)',
-                hintText: 'Anything the cooperative should know about this payment',
+                hintText:
+                    'Anything the cooperative should know about this payment',
               ),
             ),
             const SizedBox(height: 18),
@@ -1229,6 +1486,7 @@ class _BottomBar extends StatelessWidget {
     required this.blocked,
     required this.onReview,
     required this.onRecord,
+    required this.onTransfer,
   });
 
   final int total;
@@ -1241,6 +1499,10 @@ class _BottomBar extends StatelessWidget {
   final bool blocked;
   final VoidCallback? onReview;
   final VoidCallback? onRecord;
+
+  /// Null when this collector has no collection account, which is the case until
+  /// their cooperative's own Anchor account is open.
+  final VoidCallback? onTransfer;
 
   @override
   Widget build(BuildContext context) {
@@ -1287,7 +1549,10 @@ class _BottomBar extends StatelessWidget {
                       lines == 0
                           ? 'Nothing entered yet'
                           : '$lines ${lines == 1 ? 'line' : 'lines'} on this receipt',
-                      style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                      ),
                     ),
                   ],
                 ),
@@ -1325,15 +1590,34 @@ class _BottomBar extends StatelessWidget {
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
-                  : Text(blocked
-                      ? 'Cannot record for this member'
-                      : total <= 0
+                  : Text(
+                      blocked
+                          ? 'Cannot record for this member'
+                          : total <= 0
                           ? 'Enter what the member paid'
-                          : 'Record ${Money.format(total)}'),
+                          : 'Record ${Money.format(total)} cash',
+                    ),
             ),
           ),
+          // For the member who has no cash on them. The money goes straight to
+          // the cooperative, so it never enters this collector's float and is not
+          // counted against their cash limit — which is why it is offered even
+          // when they are at the limit.
+          if (onTransfer != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: saving || total <= 0 || blocked ? null : onTransfer,
+                icon: const Icon(Iconsax.bank, size: 18),
+                label: const Text('Member pays by transfer'),
+              ),
+            ),
+          ],
         ],
       ),
     );
